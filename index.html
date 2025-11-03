@@ -1,0 +1,1034 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Maze Bot (Drag & Drop)</title>
+    <!-- Memuat Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Memuat Tone.js untuk audio -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.min.js"></script>
+    <!-- Memuat SortableJS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.2/Sortable.min.js"></script>
+    
+    <style>
+        /* Menggunakan font Inter */
+        html, body {
+            height: 100%;
+            overflow-x: hidden;
+            -webkit-touch-callout: none; /* iOS Safari */
+            -webkit-user-select: none; /* Safari */
+            -khtml-user-select: none; /* Konqueror HTML */
+            -moz-user-select: none; /* Old Firefox */
+            -ms-user-select: none; /* Internet Explorer/Edge */
+            user-select: none; /* Non-prefixed version, currently supported by Chrome, Edge, Opera and Firefox */
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem; /* 16px */
+        }
+        
+        /* Area Labirin Responsif */
+        #maze-grid {
+            display: grid;
+            background-color: #f9fafb; /* gray-50 */
+            border: 2px solid #374151; /* gray-700 */
+            border-radius: 0.5rem; /* rounded-lg */
+            overflow: hidden;
+            box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.05);
+            grid-template-columns: repeat(var(--maze-cols, 5), minmax(0, 1fr));
+            grid-template-rows: repeat(var(--maze-rows, 5), minmax(0, 1fr));
+            width: 100%;
+            aspect-ratio: 1 / 1;
+        }
+        
+        /* Petak */
+        .grid-tile {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: clamp(1.25rem, 6vw, 2rem);
+            line-height: 1;
+        }
+        
+        .wall { background-color: #4b5563; }
+        .path { background-color: #ffffff; }
+        .finish { background-color: #22c55e; }
+        
+        /* Pemain */
+        #player {
+            position: absolute;
+            width: 40px;
+            height: 40px;
+            font-size: 2.5rem; /* 40px */
+            display: flex;
+            align-items: center;
+            justify: center;
+            transition: all 0.2s ease-in-out;
+            transform-origin: center center;
+            z-index: 10;
+        }
+        
+        /* === Gaya Drag-and-Drop === */
+        
+        /* Blok Perintah (Umum) */
+        .cmd-block {
+            position: relative;
+            padding: 0.75rem; /* p-3 */
+            border-radius: 0.75rem; /* rounded-xl */
+            color: white;
+            font-weight: 600; /* font-semibold */
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); /* shadow-lg */
+            cursor: grab;
+        }
+        .cmd-block:active { cursor: grabbing; }
+
+        /* Blok di Palette */
+        #palette-controls .cmd-block {
+            transition: transform 0.1s ease-out;
+        }
+        #palette-controls .cmd-block:hover {
+            transform: scale(1.05);
+        }
+
+        /* Blok di Area Program */
+        #program-container {
+            min-height: 150px;
+            background-color: white;
+            border: 2px dashed #d1d5db; /* border-dashed border-gray-300 */
+            border-radius: 0.5rem; /* rounded-lg */
+            padding: 0.75rem; /* p-3 */
+            overflow-y: auto;
+            max-height: 24rem; /* max-h-96 */
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem; /* space-y-2 */
+        }
+        
+        /* Blok Kontainer (Ulangi, Jika) di Area Program */
+        .cmd-block.is-container {
+            padding-bottom: 0.5rem;
+        }
+        
+        /* Area Drop internal untuk blok kontainer */
+        .cmd-block-content {
+            background-color: rgba(255, 255, 255, 0.2);
+            border-radius: 0.5rem; /* rounded-lg */
+            padding: 0.5rem; /* p-2 */
+            margin-top: 0.5rem; /* mt-2 */
+            min-height: 40px;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem; /* space-y-2 */
+        }
+
+        /* Warna Blok */
+        .bg-cmd-forward { background-color: #22c55e; } /* green-500 */
+        .bg-cmd-left, .bg-cmd-right { background-color: #3b82f6; } /* blue-500 */
+        .bg-cmd-repeat { background-color: #eab308; } /* yellow-500 */
+        .bg-cmd-repeat_forever { background-color: #f59e0b; } /* amber-500 */
+        .bg-cmd-if, .bg-cmd-if_else { background-color: #8b5cf6; } /* purple-500 */
+        .bg-cmd-if_else { background-color: #7c3aed; } /* purple-600 */
+
+        /* Tombol Hapus Internal */
+        .btn-delete-cmd {
+            position: absolute;
+            top: 0.25rem; /* top-1 */
+            right: 0.25rem; /* right-1 */
+            padding: 0.25rem; /* p-1 */
+            font-size: 0.75rem; /* text-xs */
+            line-height: 1;
+            font-weight: bold;
+            color: rgba(0, 0, 0, 0.4);
+            background-color: rgba(255, 255, 255, 0.3);
+            border-radius: 9999px; /* rounded-full */
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-delete-cmd:hover {
+            background-color: rgba(255, 255, 255, 0.7);
+            color: rgba(0, 0, 0, 0.7);
+        }
+
+        /* CSS untuk 'ghost' (saat di-drag) */
+        .sortable-ghost {
+            opacity: 0.4;
+            background: #9ca3af;
+        }
+        
+        /* CSS untuk 'clone' (yang ditarik dari palette) */
+        .sortable-clone {
+            opacity: 0.8;
+            transform: rotate(2deg);
+        }
+
+        /* Sorotan Eksekusi */
+        .executing {
+            animation: pulse-animation 1s infinite;
+        }
+        @keyframes pulse-animation {
+            0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(59, 130, 246, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+        }
+    </style>
+</head>
+<body class="min-h-screen">
+    
+    <!-- Kontainer Utama Aplikasi -->
+    <div class="bg-white rounded-2xl shadow-2xl p-4 sm:p-6 md:p-8 w-full max-w-5xl mx-auto">
+        
+        <h1 class="text-3xl sm:text-4xl font-bold text-center text-gray-800 mb-6">Maze Bot</h1>
+        
+        <!-- Konten Utama (Layout Responsif) -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8">
+            
+            <!-- Kolom Kiri: Labirin dan Kontrol -->
+            <div class="flex flex-col items-center">
+                
+                <h2 id="level-title" class="text-xl sm:text-2xl font-semibold text-indigo-600 mb-2">Level 1</h2>
+                
+                <!-- Pilihan Level BARU -->
+                <div class="mb-4">
+                    <label for="level-select" class="text-sm font-medium text-gray-700 mr-2">Pilih Level:</label>
+                    <select id="level-select" class="rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm py-2 px-3">
+                        <!-- Opsi akan ditambahkan oleh JS -->
+                    </select>
+                </div>
+
+                <!-- Area Labirin (Relatif untuk Pemain) -->
+                <div class="relative mb-4 w-full max-w-xs sm:max-w-sm">
+                    <div id="maze-grid">
+                        <!-- Petak labirin akan di-generate oleh JS di sini -->
+                    </div>
+                    <div id="player">➡️</div>
+                </div>
+                
+                <!-- Kontrol Eksekusi (Jalankan, Reset) -->
+                <div id="execution-controls" class="flex space-x-4 mb-4">
+                    <button id="btn-run" class="px-6 sm:px-8 py-3 bg-indigo-600 text-white font-semibold rounded-xl shadow-lg hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-opacity-50 transition-all disabled:opacity-50">Jalankan!</button>
+                    <button id="btn-reset" class="px-6 sm:px-8 py-3 bg-red-600 text-white font-semibold rounded-xl shadow-lg hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-opacity-50 transition-all">Reset</button>
+                </div>
+                
+                <!-- Kontrol Level (Level Berikutnya) -->
+                <div id="level-controls" class="hidden text-center mb-4">
+                    <button id="btn-next-level" class="px-8 py-3 bg-green-600 text-white font-semibold rounded-xl shadow-lg hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-50 transition-all">Level Berikutnya</button>
+                </div>
+
+                <p id="status-message" class="text-lg sm:text-xl font-medium h-8">&nbsp;</p>
+            </div>
+            
+            <!-- Kolom Kanan: Editor Program -->
+            <div class="bg-gray-50 p-4 sm:p-6 rounded-2xl shadow-inner">
+                
+                <!-- Palette Perintah -->
+                <h3 class="text-lg font-semibold text-gray-700 mb-2">Palette Perintah:</h3>
+                <div id="palette-controls" class="grid grid-cols-3 gap-3 sm:gap-4 mb-4">
+                    <!-- Data 'block-data' adalah JSON string dari blok yg akan dibuat -->
+                    <div class="cmd-block bg-cmd-forward" data-block-data='{"type":"forward", "id":"new"}'>⬆️ Maju</div>
+                    <div class="cmd-block bg-cmd-left" data-block-data='{"type":"left", "id":"new"}'>↪️ Kiri</div>
+                    <div class="cmd-block bg-cmd-right" data-block-data='{"type":"right", "id":"new"}'>↩️ Kanan</div>
+                    <div class="cmd-block bg-cmd-repeat col-span-1" data-block-data='{"type":"repeat", "times":3, "commands":[], "id":"new"}'>Ulangi 3x</div>
+                    <div class="cmd-block bg-cmd-repeat_forever col-span-2" data-block-data='{"type":"repeat_forever", "commands":[], "id":"new"}'>Ulangi Terus</div>
+                    <div class="cmd-block bg-cmd-if col-span-1" data-block-data='{"type":"if", "condition":"path_ahead", "commands":[], "id":"new"}'>Jika Jalan</div>
+                    <div class="cmd-block bg-cmd-if_else col-span-2" data-block-data='{"type":"if_else", "condition":"path_ahead", "commands":[], "elseCommands":[], "id":"new"}'>Jika/Lainnya</div>
+                </div>
+
+                <!-- Area Program -->
+                <h2 class="text-xl sm:text-2xl font-semibold text-gray-700 mb-2">Program:</h2>
+                
+                <!-- Tampilan Antrean Perintah (Sortable) -->
+                <div id="program-container">
+                    <!-- Perintah akan dirender oleh JS di sini -->
+                </div>
+
+            </div> <!-- Akhir Kolom Kanan -->
+            
+        </div> <!-- Akhir Layout 2 Kolom -->
+        
+    </div> <!-- Akhir Kontainer Utama -->
+
+    <script>
+    window.addEventListener('load', () => {
+
+        // --- Definisi Level ---
+        const LEVELS = [
+            // Level 1: Pengenalan dasar (Jalur Lurus)
+            {
+                maze: [
+                    [1, 1, 1, 1, 1],
+                    [1, 0, 0, 0, 1],
+                    [1, 0, 1, 2, 1],
+                    [1, 0, 1, 1, 1],
+                    [1, 1, 1, 1, 1]
+                ],
+                start: { x: 1, y: 1, dir: 1 } // dir: 0=Atas, 1=Kanan, 2=Bawah, 3=Kiri
+            },
+            // Level 2: Belokan Sederhana
+            {
+                maze: [
+                    [1, 1, 1, 1, 1],
+                    [1, 0, 0, 0, 1],
+                    [1, 0, 1, 0, 1],
+                    [1, 0, 1, 2, 1],
+                    [1, 1, 1, 1, 1]
+                ],
+                start: { x: 1, y: 1, dir: 1 }
+            },
+            // Level 3: Pengenalan 'Ulangi 3x' (Tangga)
+            {
+                maze: [
+                    [1, 1, 1, 1, 1],
+                    [1, 0, 1, 1, 1],
+                    [1, 0, 0, 1, 1],
+                    [1, 1, 0, 0, 1],
+                    [1, 1, 1, 2, 1]
+                ],
+                start: { x: 1, y: 1, dir: 1 }
+            },
+            // Level 4: Pengenalan 'Jika Jalan di Depan'
+            {
+                maze: [
+                    [1, 1, 1, 1, 1, 1],
+                    [1, 0, 0, 0, 0, 1],
+                    [1, 0, 1, 1, 0, 1],
+                    [1, 0, 0, 0, 0, 1],
+                    [1, 1, 1, 1, 2, 1],
+                    [1, 1, 1, 1, 1, 1]
+                ],
+                start: { x: 1, y: 1, dir: 1 } // Menghadap Kanan
+            },
+            // Level 5: Pengenalan 'Jika Jalan di Kiri/Kanan'
+            {
+                maze: [
+                    [1, 1, 1, 1, 1],
+                    [1, 0, 0, 0, 1],
+                    [1, 0, 1, 0, 1],
+                    [1, 0, 0, 0, 1],
+                    [1, 1, 1, 2, 1]
+                ],
+                start: { x: 1, y: 1, dir: 2 } // Menghadap Bawah
+            },
+            // Level 6: Pengenalan 'Jika/Lainnya' (Jalan buntu)
+            {
+                maze: [
+                    [1, 1, 1, 1, 1, 1],
+                    [1, 0, 0, 0, 1, 1],
+                    [1, 1, 1, 0, 1, 1],
+                    [1, 0, 0, 0, 0, 1],
+                    [1, 0, 1, 1, 2, 1],
+                    [1, 1, 1, 1, 1, 1]
+                ],
+                start: { x: 1, y: 1, dir: 1 }
+            },
+            // Level 7: 'Ulangi Terus' (Zig-zag sederhana)
+            {
+                maze: [
+                    [1, 1, 1, 1, 1],
+                    [1, 0, 1, 1, 1],
+                    [1, 0, 0, 1, 1],
+                    [1, 1, 0, 1, 1],
+                    [1, 1, 0, 0, 1],
+                    [1, 1, 1, 2, 1]
+                ],
+                start: { x: 1, y: 1, dir: 2 } // Menghadap Bawah
+            },
+            // Level 8: 'Ulangi Terus' + 'Jika' (Mengikuti dinding)
+            {
+                maze: [
+                    [1, 1, 1, 1, 1, 1],
+                    [1, 0, 0, 0, 0, 1],
+                    [1, 0, 1, 1, 0, 1],
+                    [1, 0, 0, 1, 0, 1],
+                    [1, 1, 0, 0, 0, 1],
+                    [1, 1, 1, 1, 2, 1]
+                ],
+                start: { x: 1, y: 1, dir: 1 }
+            },
+            // Level 9: Spiral (Membutuhkan logika 'Jika')
+            {
+                maze: [
+                    [1, 1, 1, 1, 1, 1, 1],
+                    [1, 0, 0, 0, 0, 0, 1],
+                    [1, 0, 1, 1, 1, 0, 1],
+                    [1, 0, 1, 0, 1, 0, 1],
+                    [1, 0, 1, 0, 0, 0, 1],
+                    [1, 0, 0, 0, 1, 2, 1],
+                    [1, 1, 1, 1, 1, 1, 1]
+                ],
+                start: { x: 1, y: 1, dir: 1 }
+            },
+             // Level 10: 'Ulangi Terus' + 'Jika/Lainnya' (Logika belokan kompleks)
+            {
+                maze: [
+                    [1, 1, 1, 1, 1, 1],
+                    [1, 0, 0, 1, 0, 1],
+                    [1, 0, 1, 1, 0, 1],
+                    [1, 0, 0, 0, 0, 1],
+                    [1, 1, 1, 1, 2, 1],
+                    [1, 1, 1, 1, 1, 1]
+                ],
+                start: { x: 1, y: 1, dir: 2 } // Mulai menghadap bawah
+            },
+            // Level 11: Jalan panjang berkelok (Uji 'Ulangi Terus')
+            {
+                maze: [
+                    [1, 1, 1, 1, 1, 1, 1],
+                    [1, 0, 0, 0, 1, 0, 1],
+                    [1, 0, 1, 0, 1, 0, 1],
+                    [1, 0, 1, 0, 0, 0, 1],
+                    [1, 0, 1, 1, 1, 0, 1],
+                    [1, 0, 0, 0, 0, 0, 1],
+                    [1, 1, 1, 1, 1, 2, 1]
+                ],
+                start: { x: 1, y: 1, dir: 1 }
+            },
+            // Level 12: Labirin (Membutuhkan algoritma 'tangan kanan')
+            {
+                maze: [
+                    [1, 1, 1, 1, 1, 1, 1],
+                    [1, 0, 1, 0, 0, 0, 1],
+                    [1, 0, 1, 0, 1, 1, 1],
+                    [1, 0, 0, 0, 1, 2, 1],
+                    [1, 1, 1, 0, 1, 1, 1],
+                    [1, 0, 0, 0, 0, 0, 1],
+                    [1, 1, 1, 1, 1, 1, 1]
+                ],
+                start: { x: 1, y: 1, dir: 1 }
+            },
+             // Level 13: Banyak jalan buntu (Uji 'Jika/Lainnya')
+            {
+                maze: [
+                    [1, 1, 1, 1, 1, 1, 1],
+                    [1, 0, 1, 0, 1, 0, 1],
+                    [1, 0, 0, 0, 1, 0, 1],
+                    [1, 1, 1, 0, 1, 0, 1],
+                    [1, 0, 0, 0, 1, 0, 1],
+                    [1, 0, 1, 1, 1, 0, 1],
+                    [1, 2, 0, 0, 0, 0, 1]
+                ],
+                start: { x: 6, y: 1, dir: 3 } // Mulai dari kanan atas, hadap kiri
+            },
+            // Level 14: Ruang terbuka (Harus tetap di jalur)
+            {
+                maze: [
+                    [1, 1, 1, 1, 1, 1, 1],
+                    [1, 0, 0, 0, 0, 0, 1],
+                    [1, 0, 1, 0, 1, 0, 1], // <-- Diperbaiki: Dulu [1, 0, 1, 1, 1, 0, 1]
+                    [1, 0, 1, 2, 1, 0, 1],
+                    [1, 0, 1, 1, 1, 0, 1],
+                    [1, 0, 0, 0, 0, 0, 1],
+                    [1, 1, 1, 1, 1, 1, 1]
+                ],
+                start: { x: 1, y: 1, dir: 1 }
+            },
+            // Level 15: Labirin Final (Kombinasi segalanya)
+            {
+                maze: [
+                    [1, 1, 1, 1, 1, 1, 1, 1],
+                    [1, 0, 0, 0, 1, 0, 0, 1],
+                    [1, 0, 1, 0, 1, 0, 1, 1],
+                    [1, 0, 1, 0, 0, 0, 0, 1],
+                    [1, 1, 1, 0, 1, 1, 0, 1],
+                    [1, 0, 0, 0, 1, 0, 0, 1],
+                    [1, 0, 1, 1, 1, 0, 1, 1],
+                    [1, 2, 0, 0, 0, 0, 0, 1]
+                ],
+                start: { x: 1, y: 1, dir: 2 } // Menghadap Bawah
+            }
+        ];
+
+        // --- State Game ---
+        let currentLevel = 0;
+        let MAZE = [];
+        let player = { x: 0, y: 0, dir: 0 };
+        let startPos = { x: 0, y: 0, dir: 0 };
+        // Struktur data utama sekarang dikelola oleh SortableJS
+        let program = { commands: [] }; 
+        let isRunning = false;
+        let executionAbort = false;
+        let executionInterval = null;
+
+        // --- Referensi DOM ---
+        const mazeGrid = document.getElementById('maze-grid');
+        const playerEl = document.getElementById('player');
+        const levelTitle = document.getElementById('level-title');
+        const levelSelect = document.getElementById('level-select'); // <-- BARU
+        const programContainer = document.getElementById('program-container');
+        const paletteControls = document.getElementById('palette-controls');
+        
+        const btnRun = document.getElementById('btn-run');
+        const btnReset = document.getElementById('btn-reset');
+        const btnNextLevel = document.getElementById('btn-next-level');
+
+        const executionControls = document.getElementById('execution-controls');
+        const levelControls = document.getElementById('level-controls');
+        
+        // --- Setup Efek Suara ---
+        let moveSound, turnSound, wallSound, winSound, failSound;
+        let soundsReady = false;
+
+        function initSounds() {
+            if (soundsReady || !window.Tone) return;
+            try {
+                moveSound = new Tone.Synth({ oscillator: { type: 'sine' }, envelope: { attack: 0.01, decay: 0.1, sustain: 0, release: 0.1 } }).toDestination();
+                turnSound = new Tone.NoiseSynth({ noise: { type: 'white' }, envelope: { attack: 0.01, decay: 0.05, sustain: 0, release: 0.05 } }).toDestination();
+                wallSound = new Tone.MembraneSynth({ pitchDecay: 0.1, octaves: 2, envelope: { attack: 0.01, decay: 0.2, sustain: 0, release: 0.1 } }).toDestination();
+                winSound = new Tone.PolySynth(Tone.Synth, { envelope: { attack: 0.01, decay: 0.1, sustain: 0.1, release: 0.2 } }).toDestination();
+                failSound = new Tone.Synth({ oscillator: { type: 'triangle' }, envelope: { attack: 0.01, decay: 0.2, sustain: 0, release: 0.1 } }).toDestination();
+                soundsReady = true;
+            } catch (e) {
+                console.error("Gagal inisialisasi Tone.js:", e);
+                soundsReady = false;
+            }
+        }
+        
+        // --- Fungsi Game ---
+
+        // Fungsi rekursif untuk merender tampilan program
+        function renderProgram(container, commandList) {
+            container.innerHTML = ''; // Kosongkan
+            
+            commandList.forEach(cmd => {
+                const el = createBlockElement(cmd);
+                container.appendChild(el);
+                
+                // Jika ini kontainer, render isinya secara rekursif
+                if (cmd.type === 'repeat' || cmd.type === 'repeat_forever') {
+                    const contentEl = el.querySelector('.cmd-block-content');
+                    renderProgram(contentEl, cmd.commands);
+                } else if (cmd.type === 'if') {
+                    const contentEl = el.querySelector('.cmd-block-content');
+                    renderProgram(contentEl, cmd.commands);
+                } else if (cmd.type === 'if_else') {
+                    const ifContentEl = el.querySelector('.cmd-block-content[data-type="if"]');
+                    const elseContentEl = el.querySelector('.cmd-block-content[data-type="else"]');
+                    renderProgram(ifContentEl, cmd.commands);
+                    renderProgram(elseContentEl, cmd.elseCommands);
+                }
+            });
+            
+            // Inisialisasi Sortable untuk kontainer ini
+            initSortable(container, commandList);
+        }
+
+        // Membuat elemen DOM untuk satu blok
+        function createBlockElement(cmd) {
+            const el = document.createElement('div');
+            el.className = 'cmd-block';
+            el.dataset.id = cmd.id; // Tautkan elemen DOM ke ID data
+
+            let contentHTML = '';
+            
+            // Tambahkan tombol hapus
+            contentHTML += `<button class="btn-delete-cmd" title="Hapus">✖</button>`;
+
+            if (cmd.type === 'forward') {
+                el.classList.add('bg-cmd-forward');
+                contentHTML += '⬆️ Maju';
+            } else if (cmd.type === 'left') {
+                el.classList.add('bg-cmd-left');
+                contentHTML += '↪️ Kiri';
+            } else if (cmd.type === 'right') {
+                el.classList.add('bg-cmd-right');
+                contentHTML += '↩️ Kanan';
+            } 
+            // Blok Kontainer
+            else {
+                el.classList.add('is-container');
+                if (cmd.type === 'repeat') {
+                    el.classList.add('bg-cmd-repeat');
+                    contentHTML += `Ulangi ${cmd.times}x:`;
+                    contentHTML += `<div class="cmd-block-content" data-id="${cmd.id}-content"></div>`;
+                } else if (cmd.type === 'repeat_forever') {
+                    el.classList.add('bg-cmd-repeat_forever');
+                    contentHTML += `Ulangi Terus Menerus:`;
+                    contentHTML += `<div class="cmd-block-content" data-id="${cmd.id}-content"></div>`;
+                } else if (cmd.type === 'if') {
+                    el.classList.add('bg-cmd-if');
+                    contentHTML += `Jika ${createConditionDropdown(cmd)}:`;
+                    contentHTML += `<div class="cmd-block-content" data-id="${cmd.id}-content"></div>`;
+                } else if (cmd.type === 'if_else') {
+                    el.classList.add('bg-cmd-if_else');
+                    contentHTML += `Jika ${createConditionDropdown(cmd)}:`;
+                    contentHTML += `<div class="cmd-block-content" data-type="if" data-id="${cmd.id}-content"></div>`;
+                    contentHTML += `<div class="mt-2 pt-2 border-t border-white/30">Lainnya:</div>`;
+                    contentHTML += `<div class="cmd-block-content" data-type="else" data-id="${cmd.id}-else-content"></div>`;
+                }
+            }
+            
+            el.innerHTML = contentHTML;
+            return el;
+        }
+        
+        // Membuat dropdown untuk kondisi 'Jika'
+        function createConditionDropdown(cmd) {
+            // Hentikan propagasi event agar tidak memicu drag
+            const stopPropagation = (e) => e.stopPropagation();
+
+            return `
+                <select class="condition-select bg-white/20 rounded ml-1" 
+                        data-id="${cmd.id}" 
+                        onmousedown="${stopPropagation}" 
+                        ontouchstart="${stopPropagation}">
+                    <option value="path_ahead" ${cmd.condition === 'path_ahead' ? 'selected' : ''}>Jalan di Depan</option>
+                    <option value="path_left" ${cmd.condition === 'path_left' ? 'selected' : ''}>Jalan di Kiri</option>
+                    <option value="path_right" ${cmd.condition === 'path_right' ? 'selected' : ''}>Jalan di Kanan</option>
+                </select>
+            `;
+        }
+        
+        // --- Logika SortableJS (Drag & Drop) ---
+        
+        // Array untuk melacak semua instance Sortable
+        let sortableInstances = [];
+
+        // Hancurkan semua instance Sortable
+        function destroySortables() {
+            sortableInstances.forEach(s => s.destroy());
+            sortableInstances = [];
+        }
+
+        // Inisialisasi Palette
+        new Sortable(paletteControls, {
+            group: {
+                name: 'commands',
+                pull: 'clone', // Kloning saat ditarik
+                put: false // Tidak bisa menaruh di sini
+            },
+            animation: 150,
+            sort: false, // Jangan izinkan pengurutan di dalam palette
+            onClone: (evt) => {
+                initSounds(); // Inisialisasi suara saat drag pertama
+            }
+        });
+
+        // Inisialisasi Sortable untuk Kontainer (dan sub-kontainer)
+        function initSortable(container, commandList) {
+            const instance = new Sortable(container, {
+                group: 'commands',
+                animation: 150,
+                ghostClass: 'sortable-ghost',
+                
+                // Menambahkan item baru (dari palette)
+                onAdd: (evt) => {
+                    const el = evt.item; // Elemen DOM yang dikloning
+                    const blockDataJSON = el.dataset.blockData;
+                    
+                    if (!blockDataJSON) { // Jika ini bukan dari palette, tapi dari list lain
+                        const cmdId = el.dataset.id;
+                        const blockData = findAndRemoveCommand(program.commands, cmdId);
+                        if (blockData) {
+                            commandList.splice(evt.newIndex, 0, blockData);
+                        }
+                    } else {
+                        // Ini adalah klon dari palette
+                        const newBlockData = JSON.parse(blockDataJSON);
+                        newBlockData.id = crypto.randomUUID(); // Beri ID unik baru
+                        
+                        // Ganti elemen klon dengan elemen render yang baru
+                        const newEl = createBlockElement(newBlockData);
+                        el.parentNode.replaceChild(newEl, el);
+                        
+                        // Tambahkan data ke array
+                        commandList.splice(evt.newIndex, 0, newBlockData);
+                    }
+                    
+                    // Render ulang SELURUH program untuk sinkronisasi
+                    // Ini adalah cara paling aman untuk memastikan data dan DOM cocok
+                    fullRerenderAndReinit();
+                },
+                
+                // Mengatur ulang item di list yang sama
+                onUpdate: (evt) => {
+                    // Pindahkan item di dalam array data
+                    const item = commandList.splice(evt.oldIndex, 1)[0];
+                    commandList.splice(evt.newIndex, 0, item);
+                    fullRerenderAndReinit();
+                },
+
+                // Item dipindahkan KE LIST LAIN
+                onRemove: (evt) => {
+                    // PERBAIKAN:
+                    // Biarkan 'onAdd' di list tujuan yang menangani
+                    // pemindahan data. JANGAN lakukan apa-apa di sini.
+                    
+                    // KODE LAMA YANG MENYEBABKAN BUG:
+                    // commandList.splice(evt.oldIndex, 1);
+                    // fullRerenderAndReinit();
+                }
+            });
+            sortableInstances.push(instance);
+        }
+
+        // Fungsi helper untuk mencari dan menghapus cmd dari data
+        function findAndRemoveCommand(commandList, id) {
+            for (let i = 0; i < commandList.length; i++) {
+                const cmd = commandList[i];
+                if (cmd.id === id) {
+                    return commandList.splice(i, 1)[0]; // Temukan dan hapus
+                }
+                // Cari di dalam sub-list
+                if (cmd.commands) {
+                    const found = findAndRemoveCommand(cmd.commands, id);
+                    if (found) return found;
+                }
+                if (cmd.elseCommands) {
+                    const found = findAndRemoveCommand(cmd.elseCommands, id);
+                    if (found) return found;
+                }
+            }
+            return null; // Tidak ditemukan
+        }
+        
+        // Fungsi untuk merender ulang seluruh UI dari data 'program'
+        function fullRerenderAndReinit() {
+            destroySortables(); // Hapus semua listener lama
+            renderProgram(programContainer, program.commands); // Render ulang dari awal
+            // 'renderProgram' akan memanggil 'initSortable' secara rekursif
+        }
+
+        // Menangani Hapus dan Update Kondisi
+        programContainer.addEventListener('click', (e) => {
+            if (isRunning) return;
+            // Hapus Blok
+            const deleteBtn = e.target.closest('.btn-delete-cmd');
+            if (deleteBtn) {
+                e.stopPropagation();
+                const blockEl = e.target.closest('.cmd-block');
+                const cmdId = blockEl.dataset.id;
+                
+                // Hapus dari data
+                findAndRemoveCommand(program.commands, cmdId);
+                // Render ulang
+                fullRerenderAndReinit();
+            }
+        });
+        
+        programContainer.addEventListener('change', (e) => {
+             if (isRunning) return;
+             // Update Kondisi dari Select
+            const select = e.target.closest('.condition-select');
+            if (select) {
+                const cmdId = select.dataset.id;
+                const newCondition = select.value;
+                
+                // Fungsi rekursif untuk mencari dan update
+                function findAndUpdate(commandList, id, newCond) {
+                    for (const cmd of commandList) {
+                        if (cmd.id === id) {
+                            cmd.condition = newCond;
+                            return true;
+                        }
+                        if (cmd.commands && findAndUpdate(cmd.commands, id, newCond)) return true;
+                        if (cmd.elseCommands && findAndUpdate(cmd.elseCommands, id, newCond)) return true;
+                    }
+                    return false;
+                }
+                
+                findAndUpdate(program.commands, cmdId, newCondition);
+                // Tidak perlu re-render penuh, tapi lebih aman
+                fullRerenderAndReinit();
+            }
+        });
+
+
+        // Menggambar Labirin
+        function drawMaze() {
+            const levelData = LEVELS[currentLevel];
+            MAZE = levelData.maze;
+            
+            const rows = MAZE.length;
+            const cols = MAZE[0].length;
+            
+            mazeGrid.style.setProperty('--maze-rows', rows);
+            mazeGrid.style.setProperty('--maze-cols', cols);
+            mazeGrid.innerHTML = ''; 
+
+            for (let y = 0; y < rows; y++) {
+                for (let x = 0; x < cols; x++) {
+                    const tile = document.createElement('div');
+                    tile.className = 'grid-tile';
+                    if (MAZE[y][x] === 1) tile.classList.add('wall');
+                    else if (MAZE[y][x] === 2) {
+                        tile.classList.add('finish');
+                        tile.innerHTML = '🏁';
+                    } else tile.classList.add('path');
+                    mazeGrid.appendChild(tile);
+                }
+            }
+            updatePlayerPosition();
+        }
+
+        // Memperbarui Posisi Pemain (di Layar)
+        function updatePlayerPosition() {
+            const { x, y, dir } = player;
+            const gridRect = mazeGrid.getBoundingClientRect();
+            const gridWidth = gridRect.width;
+            const cols = MAZE[0].length;
+            const TILE_SIZE = gridWidth / cols;
+            const PLAYER_OFFSET = (TILE_SIZE - 40) / 2;
+
+            playerEl.style.left = `${x * TILE_SIZE + PLAYER_OFFSET}px`;
+            playerEl.style.top = `${y * TILE_SIZE + PLAYER_OFFSET}px`;
+            
+            if (dir === 0) playerEl.style.transform = 'rotate(-90deg)';
+            if (dir === 1) playerEl.style.transform = 'rotate(0deg)';
+            if (dir === 2) playerEl.style.transform = 'rotate(90deg)';
+            if (dir === 3) playerEl.style.transform = 'rotate(180deg)';
+        }
+
+        // Memuat Level
+        function loadLevel(levelIndex) {
+            currentLevel = levelIndex;
+            if (currentLevel >= LEVELS.length) {
+                showMessage("Anda telah menyelesaikan semua level!", true);
+                executionControls.classList.add('hidden');
+                levelControls.classList.add('hidden');
+                levelTitle.textContent = "Tamat!";
+                levelSelect.classList.add('hidden'); // <-- BARU: Sembunyikan dropdown
+                return;
+            }
+            
+            levelTitle.textContent = `Level ${currentLevel + 1}`;
+            levelSelect.value = currentLevel; // <-- BARU: Sinkronkan dropdown
+            levelSelect.classList.remove('hidden'); // <-- BARU: Tampilkan dropdown
+            
+            const levelData = LEVELS[currentLevel];
+            startPos = { ...levelData.start };
+            player = { ...startPos };
+            drawMaze();
+            resetGame();
+        }
+
+        // Reset Game
+        function resetGame() {
+            player = { ...startPos };
+            updatePlayerPosition();
+            
+            executionAbort = true;
+            if (executionInterval) {
+                clearInterval(executionInterval);
+                executionInterval = null;
+            }
+            
+            isRunning = false;
+            
+            // Kosongkan program
+            program.commands = [];
+            
+            // Atur tombol
+            executionControls.classList.remove('hidden');
+            levelControls.classList.add('hidden');
+            disableInput(false);
+            
+            document.querySelectorAll('.executing').forEach(el => el.classList.remove('executing'));
+            showMessage("&nbsp;");
+            
+            // Render ulang program (kosong)
+            fullRerenderAndReinit();
+        }
+        
+        // Nonaktifkan input saat berjalan
+        function disableInput(disabled) {
+             btnRun.disabled = disabled;
+             btnReset.disabled = disabled;
+             btnRun.textContent = disabled ? 'Menjalankan...' : 'Jalankan!';
+             
+             // Nonaktifkan/aktifkan semua instance Sortable
+             sortableInstances.forEach(s => s.option('disabled', disabled));
+             
+             // Nonaktifkan tombol hapus & select
+             programContainer.querySelectorAll('.btn-delete-cmd, .condition-select').forEach(el => {
+                el.disabled = disabled;
+             });
+        }
+
+        function showMessage(text, isSuccess) {
+            const statusEl = document.getElementById('status-message');
+            statusEl.innerHTML = text;
+            if (isSuccess === true) statusEl.className = 'text-lg sm:text-xl font-medium h-8 text-green-600';
+            else if (isSuccess === false) statusEl.className = 'text-lg sm:text-xl font-medium h-8 text-red-600';
+            else statusEl.className = 'text-lg sm:text-xl font-medium h-8';
+        }
+        
+        const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+        // Cek kondisi
+        function checkCondition(condition) {
+            let { x, y, dir } = player;
+            let checkDir = dir;
+
+            if (condition === 'path_left') checkDir = (dir - 1 + 4) % 4;
+            else if (condition === 'path_right') checkDir = (dir + 1) % 4;
+            
+            if (checkDir === 0) y--;
+            if (checkDir === 1) x++;
+            if (checkDir === 2) y++;
+            if (checkDir === 3) x--;
+            
+            return MAZE[y] !== undefined && MAZE[y][x] !== undefined && MAZE[y][x] !== 1;
+        }
+
+        // Sorot perintah
+        function highlightCommand(cmdId) {
+            document.querySelectorAll('.executing').forEach(el => el.classList.remove('executing'));
+            const el = document.querySelector(`[data-id="${cmdId}"]`);
+            
+            if (el) {
+                el.classList.add('executing');
+                el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+        }
+
+        // Menjalankan Program (Logika Inti)
+        async function runProgram() {
+            if (isRunning) return;
+            initSounds();
+            
+            player = { ...startPos };
+            updatePlayerPosition();
+            isRunning = true;
+            executionAbort = false;
+            disableInput(true);
+            showMessage("&nbsp;");
+
+            try {
+                await executeCommandList(program.commands);
+                
+                if (!executionAbort) {
+                    if (MAZE[player.y][player.x] !== 2) {
+                        throw new Error("Belum sampai di finish!");
+                    }
+                }
+
+            } catch (error) {
+                if (!executionAbort) {
+                    showMessage(error.message, false);
+                    if (soundsReady && failSound) failSound.triggerAttackRelease("C3", "0.2", Tone.now());
+                }
+            } finally {
+                isRunning = false;
+                disableInput(false);
+                btnReset.disabled = false;
+                document.querySelectorAll('.executing').forEach(el => el.classList.remove('executing'));
+
+                if (!executionAbort && MAZE[player.y][player.x] === 2) {
+                    showMessage("Berhasil!", true);
+                    if (soundsReady && winSound) winSound.triggerAttackRelease(["C4", "E4", "G4"], "0.2", Tone.now());
+                    executionControls.classList.add('hidden');
+                    levelControls.classList.remove('hidden'); // PERBAIKAN: Dulu 'add', sekarang 'remove'
+                }
+            }
+        }
+
+        // Fungsi rekursif untuk mengeksekusi daftar perintah
+        async function executeCommandList(commandList) {
+            for (const cmd of commandList) {
+                if (executionAbort) throw new Error("Eksekusi dihentikan.");
+                
+                highlightCommand(cmd.id);
+                await sleep(300);
+
+                if (cmd.type === 'forward') {
+                    let { x, y, dir } = player;
+                    if (dir === 0) y--;
+                    if (dir === 1) x++;
+                    if (dir === 2) y++;
+                    if (dir === 3) x--;
+                    
+                    if (MAZE[y] === undefined || MAZE[y][x] === undefined || MAZE[y][x] === 1) {
+                        if (soundsReady && wallSound) wallSound.triggerAttackRelease("C2", "0.2", Tone.now());
+                        throw new Error("Menabrak! Coba lagi.");
+                    }
+                    
+                    player.x = x;
+                    player.y = y;
+                    updatePlayerPosition();
+                    if (soundsReady && moveSound) moveSound.triggerAttackRelease("C4", "0.1", Tone.now());
+                    
+                    if (MAZE[y][x] === 2) return;
+                } 
+                else if (cmd.type === 'left') {
+                    player.dir = (player.dir - 1 + 4) % 4;
+                    updatePlayerPosition();
+                    if (soundsReady && turnSound) turnSound.triggerAttack(Tone.now(), 0.1);
+                } 
+                else if (cmd.type === 'right') {
+                    player.dir = (player.dir + 1) % 4;
+                    updatePlayerPosition();
+                    if (soundsReady && turnSound) turnSound.triggerAttack(Tone.now(), 0.1);
+                }
+                else if (cmd.type === 'repeat') {
+                    for (let i = 0; i < cmd.times; i++) {
+                        await executeCommandList(cmd.commands);
+                        if (executionAbort || MAZE[player.y][player.x] === 2) return;
+                    }
+                }
+                else if (cmd.type === 'repeat_forever') {
+                    while (true) {
+                        await executeCommandList(cmd.commands);
+                        if (executionAbort || MAZE[player.y][player.x] === 2) return;
+                        await sleep(100);
+                    }
+                }
+                else if (cmd.type === 'if') {
+                    if (checkCondition(cmd.condition)) {
+                        await executeCommandList(cmd.commands);
+                        if (executionAbort || MAZE[player.y][player.x] === 2) return;
+                    }
+                }
+                else if (cmd.type === 'if_else') {
+                    if (checkCondition(cmd.condition)) {
+                        await executeCommandList(cmd.commands);
+                    } else {
+                        await executeCommandList(cmd.elseCommands);
+                    }
+                    if (executionAbort || MAZE[player.y][player.x] === 2) return;
+                }
+                
+                await sleep(200);
+            }
+        }
+
+        // --- Event Listeners ---
+        btnRun.addEventListener('click', runProgram);
+        btnReset.addEventListener('click', () => {
+            executionAbort = true;
+            loadLevel(currentLevel);
+        });
+        btnNextLevel.addEventListener('click', () => {
+            loadLevel(currentLevel + 1);
+        });
+        window.addEventListener('resize', updatePlayerPosition);
+
+        // --- BARU: Fungsi untuk mengisi dropdown level ---
+        function populateLevelSelect() {
+            levelSelect.innerHTML = '';
+            for (let i = 0; i < LEVELS.length; i++) {
+                const option = document.createElement('option');
+                option.value = i;
+                option.textContent = `Level ${i + 1}`;
+                levelSelect.appendChild(option);
+            }
+        }
+        
+        // --- BARU: Listener untuk dropdown ---
+        levelSelect.addEventListener('change', () => {
+            const newLevelIndex = parseInt(levelSelect.value, 10);
+            loadLevel(newLevelIndex);
+        });
+
+        // --- Inisialisasi Game ---
+        populateLevelSelect(); // <-- BARU: Panggil fungsi popuasi
+        loadLevel(0); // Mulai dari Level 1
+    });
+    </script>
+</body>
+</html>
