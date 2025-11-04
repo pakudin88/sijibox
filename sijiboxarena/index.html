@@ -1,0 +1,1482 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SIJIBOX Arena (Multiplayer)</title>
+    <!-- Memuat Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Memuat Tone.js untuk audio -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.min.js"></script>
+    <!-- Memuat SortableJS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.2/Sortable.min.js"></script>
+    
+    <!-- Impor Firebase SDK -->
+    <script type="module">
+        // Impor yang diperlukan dari Firebase SDK
+        import { initializeApp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAnalytics } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-analytics.js"; // BARU
+        import { 
+            getAuth, 
+            signInAnonymously, 
+            // signInWithCustomToken, // Tidak diperlukan lagi
+            onAuthStateChanged 
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { 
+            getFirestore, 
+            doc, 
+            setDoc, 
+            getDoc,
+            onSnapshot, 
+            collection, 
+            query, 
+            updateDoc,
+            deleteDoc,
+            serverTimestamp,
+            deleteField 
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // --- Variabel Global Firebase ---
+        let db, auth;
+        let userId = null;
+        let username = null; 
+        let isAuthReady = false;
+        let currentRoomId = null;
+        let currentRoomListener = null; // Untuk unsubscribe snapshot
+        let roomsListListener = null;
+
+        // --- State Game Lokal ---
+        let program = { commands: [] };
+        let paletteSortable = null;
+        let sortableInstances = [];
+        let isRunning = false;
+        let executionAbort = false;
+        let playerBots = {}; // Menyimpan elemen DOM bot
+        let localPlayerState = {}; // Menyimpan posisi lokal bot
+        let localGameData = {}; // Menyimpan data room
+        let playerColors = [
+            '#3b82f6', // blue-500
+            '#ec4899', // pink-500
+            '#16a34a', // green-600
+            '#ca8a04'  // yellow-600
+        ];
+
+        // --- Referensi DOM ---
+        const loadingView = document.getElementById('loading-view');
+        const usernameView = document.getElementById('username-view'); 
+        const lobbyView = document.getElementById('lobby-view');
+        const gameView = document.getElementById('game-view');
+
+        // DOM Username
+        const usernameInput = document.getElementById('username-input'); 
+        const btnSetUsername = document.getElementById('btn-set-username'); 
+
+        // DOM Lobi
+        const userIdDisplay = document.getElementById('user-id-display');
+        const usernameDisplay = document.getElementById('username-display'); 
+        const roomNameInput = document.getElementById('room-name-input');
+        const createRoomBtn = document.getElementById('btn-create-room');
+        const joinRoomInput = document.getElementById('join-room-input');
+        const joinRoomBtn = document.getElementById('btn-join-room');
+        const roomsListContainer = document.getElementById('rooms-list');
+        const arenaSelect = document.getElementById('arena-select');
+
+        // DOM Game
+        const mazeGrid = document.getElementById('maze-grid');
+        const botsContainer = document.getElementById('bots-container');
+        const arenaTitle = document.getElementById('arena-title');
+        const playerStatusList = document.getElementById('player-status-list');
+        const paletteControls = document.getElementById('palette-controls');
+        const programContainer = document.getElementById('program-container');
+        const btnReady = document.getElementById('btn-ready');
+        const btnStartRace = document.getElementById('btn-start-race');
+        const btnLeaveRoom = document.getElementById('btn-leave-room');
+        const gameStatusMessage = document.getElementById('game-status-message');
+
+        // --- Definisi Arena (BARU) ---
+        const ARENAS = {
+            "Sirkuit Cepat": {
+                maze: [
+                    [1, 1, 1, 1, 1, 1, 1],
+                    [1, 0, 0, 0, 0, 0, 1],
+                    [1, 0, 1, 1, 1, 0, 1],
+                    [1, 0, 1, 0, 1, 0, 1],
+                    [1, 0, 1, 0, 0, 0, 1],
+                    [1, 0, 0, 0, 1, 2, 1],
+                    [1, 1, 1, 1, 1, 1, 1]
+                ],
+                start: { x: 1, y: 1, dir: 1 }
+            },
+            "Lorong Maut": {
+                maze: [
+                    [1, 1, 1, 1, 1, 1, 1],
+                    [1, 0, 1, 0, 1, 0, 1],
+                    [1, 0, 1, 0, 1, 0, 1],
+                    [1, 0, 1, 0, 1, 0, 1],
+                    [1, 0, 0, 0, 0, 0, 1],
+                    [1, 1, 1, 1, 1, 2, 1]
+                ],
+                start: { x: 1, y: 1, dir: 2 }
+            },
+            "Spiral Ganda": {
+                maze: [
+                    [1, 1, 1, 1, 1, 1, 1, 1, 1],
+                    [1, 0, 0, 0, 0, 0, 0, 0, 1],
+                    [1, 0, 1, 1, 1, 1, 1, 0, 1],
+                    [1, 0, 1, 0, 0, 0, 1, 0, 1],
+                    [1, 0, 1, 0, 2, 0, 1, 0, 1],
+                    [1, 0, 1, 0, 0, 0, 1, 0, 1],
+                    [1, 0, 1, 1, 1, 1, 1, 0, 1],
+                    [1, 0, 0, 0, 0, 0, 0, 0, 1],
+                    [1, 1, 1, 1, 1, 1, 1, 1, 1]
+                ],
+                start: { x: 1, y: 1, dir: 1 }
+            },
+            "Pilihan Ganda": {
+                maze: [
+                    [1, 1, 1, 1, 1, 1, 1, 1],
+                    [1, 0, 0, 1, 0, 0, 0, 1],
+                    [1, 0, 1, 1, 0, 1, 0, 1],
+                    [1, 0, 0, 0, 0, 1, 0, 1],
+                    [1, 1, 1, 0, 1, 1, 0, 1],
+                    [1, 0, 0, 0, 1, 0, 0, 1],
+                    [1, 0, 1, 1, 1, 0, 1, 1],
+                    [1, 2, 0, 0, 0, 0, 0, 1]
+                ],
+                start: { x: 1, y: 1, dir: 2 }
+            }
+        };
+
+        // --- Definisi Blok (Sama seperti sebelumnya) ---
+        const BLOCK_DEFINITIONS = {
+            'forward': {
+                html: `<div class="cmd-block bg-cmd-forward" data-block-data='{"type":"forward", "id":"new"}'>⬆️ Maju</div>`,
+                colSpan: 'col-span-1'
+            },
+            'left': {
+                html: `<div class="cmd-block bg-cmd-left" data-block-data='{"type":"left", "id":"new"}'>↪️ Kiri</div>`,
+                colSpan: 'col-span-1'
+            },
+            'right': {
+                html: `<div class="cmd-block bg-cmd-right" data-block-data='{"type":"right", "id":"new"}'>↩️ Kanan</div>`,
+                colSpan: 'col-span-1'
+            },
+            'repeat': {
+                html: `<div class="cmd-block bg-cmd-repeat" data-block-data='{"type":"repeat", "times":3, "commands":[], "id":"new"}'>Ulangi 3x</div>`,
+                colSpan: 'col-span-1'
+            },
+            'repeat_forever': {
+                html: `<div class="cmd-block bg-cmd-repeat_forever" data-block-data='{"type":"repeat_forever", "commands":[], "id":"new"}'>Ulangi Terus</div>`,
+                colSpan: 'col-span-2'
+            },
+            'if': {
+                html: `<div class="cmd-block bg-cmd-if" data-block-data='{"type":"if", "condition":"path_ahead", "commands":[], "id":"new"}'>Jika Jalan</div>`,
+                colSpan: 'col-span-1'
+            },
+            'if_else': {
+                html: `<div class="cmd-block bg-cmd-if_else" data-block-data='{"type":"if_else", "condition":"path_ahead", "commands":[], "elseCommands":[], "id":"new"}'>Jika/Lainnya</div>`,
+                colSpan: 'col-span-2'
+            },
+            'proc_def_1': {
+                html: `<div class="cmd-block bg-pink-500" data-block-data='{"type":"proc_def_1", "name":"Fungsi 1", "commands":[], "id":"new"}'>Definisi Fungsi 1</div>`,
+                colSpan: 'col-span-3'
+            },
+            'proc_call_1': {
+                html: `<div class="cmd-block bg-pink-400" data-block-data='{"type":"proc_call_1", "name":"Fungsi 1", "id":"new"}'>Jalankan Fungsi 1</div>`,
+                colSpan: 'col-span-3'
+            }
+        };
+
+        // --- Setup Efek Suara (Sama seperti sebelumnya) ---
+        let moveSound, turnSound, wallSound, winSound, failSound;
+        let soundsReady = false;
+
+        function initSounds() {
+            if (soundsReady || !window.Tone) return;
+            try {
+                moveSound = new Tone.Synth({ oscillator: { type: 'sine' }, envelope: { attack: 0.01, decay: 0.1, sustain: 0, release: 0.1 } }).toDestination();
+                turnSound = new Tone.NoiseSynth({ noise: { type: 'white' }, envelope: { attack: 0.01, decay: 0.05, sustain: 0, release: 0.05 } }).toDestination();
+                wallSound = new Tone.MembraneSynth({ pitchDecay: 0.1, octaves: 2, envelope: { attack: 0.01, decay: 0.2, sustain: 0, release: 0.1 } }).toDestination();
+                winSound = new Tone.PolySynth(Tone.Synth, { envelope: { attack: 0.01, decay: 0.1, sustain: 0.1, release: 0.2 } }).toDestination();
+                failSound = new Tone.Synth({ oscillator: { type: 'triangle' }, envelope: { attack: 0.01, decay: 0.2, sustain: 0, release: 0.1 } }).toDestination();
+                soundsReady = true;
+            } catch (e) {
+                console.error("Gagal inisialisasi Tone.js:", e);
+            }
+        }
+        
+        // --- Fungsi Tampilan ---
+        function showView(viewId) {
+            loadingView.classList.add('hidden');
+            usernameView.classList.add('hidden'); 
+            lobbyView.classList.add('hidden');
+            gameView.classList.add('hidden');
+            
+            if (viewId === 'loading') loadingView.classList.remove('hidden');
+            if (viewId === 'username') usernameView.classList.remove('hidden'); 
+            if (viewId === 'lobby') lobbyView.classList.remove('hidden');
+            if (viewId === 'game') gameView.classList.remove('hidden');
+        }
+
+        // --- Logika Firebase ---
+        async function initFirebase() {
+            try {
+                // --- KODE BARU: Konfigurasi dari pengguna ---
+                const firebaseConfig = {
+                  apiKey: "AIzaSyBbPlSf8go0DzrlLoPpBstWkxMMrVkgmpQ",
+                  authDomain: "sijiboxarena.firebaseapp.com",
+                  projectId: "sijiboxarena",
+                  storageBucket: "sijiboxarena.firebasestorage.app",
+                  messagingSenderId: "782908229080",
+                  appId: "1:782908229080:web:bdf6cf761376a6e92e5ead",
+                  measurementId: "G-WFJM2GWH77"
+                };
+
+                // --- ID Aplikasi Anda (harus konsisten dengan Security Rules) ---
+                const appId = "sijiboxarena"; // Menggunakan projectId sebagai appId
+                
+                // Initialize Firebase
+                const app = initializeApp(firebaseConfig);
+                const analytics = getAnalytics(app); // Diinisialisasi
+                
+                db = getFirestore(app);
+                auth = getAuth(app);
+                
+                // setLogLevel('debug'); // Aktifkan untuk debugging firestore
+
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        isAuthReady = true;
+                        
+                        // Cek apakah nama pengguna sudah ada
+                        if (!username) {
+                            showView('username');
+                        } else {
+                            userIdDisplay.textContent = `ID Anda: ${userId}`;
+                            usernameDisplay.textContent = `Nama: ${username}`;
+                            console.log("Firebase Auth berhasil, UserID:", userId, "Username:", username);
+                            showView('lobby');
+                            listenToRoomsList(appId); // Mulai mendengarkan daftar room
+                        }
+                    } else {
+                        // Coba sign-in (hanya anonim untuk versi publik)
+                        try {
+                            await signInAnonymously(auth);
+                        } catch (authError) {
+                            console.error("Auth Error:", authError);
+                            loadingView.textContent = "Gagal terhubung. Silakan refresh.";
+                        }
+                    }
+                });
+
+            } catch (e) {
+                console.error("Gagal inisialisasi Firebase:", e);
+                loadingView.textContent = "Error: Gagal memuat Firebase. Cek konsol.";
+            }
+        }
+        
+        // BARU: Fungsi untuk mengatur nama pengguna
+        function handleSetUsername() {
+            const name = usernameInput.value.trim();
+            if (name.length < 3) {
+                // Jangan gunakan alert()
+                console.warn("Nama pengguna minimal 3 karakter."); 
+                usernameInput.classList.add('border-red-500');
+                return;
+            }
+            usernameInput.classList.remove('border-red-500');
+            username = name; // Simpan nama pengguna secara global
+            
+            // Pindahkan ke lobi
+            userIdDisplay.textContent = `ID Anda: ${userId}`;
+            usernameDisplay.textContent = `Nama: ${username}`;
+            showView('lobby');
+            
+            // --- PERUBAHAN: Gunakan appId yang didefinisikan ---
+            const appId = "sijiboxarena"; 
+            listenToRoomsList(appId);
+        }
+
+        // --- Logika Lobi ---
+        function getRoomsCollectionPath() {
+            // --- PERUBAHAN: Gunakan appId yang didefinisikan ---
+            const appId = "sijiboxarena"; 
+            return `/artifacts/${appId}/public/data/sijibox_rooms`;
+        }
+
+        // Mendengarkan semua room yang ada di lobi
+        function listenToRoomsList() { // appId tidak lagi dilempar, tapi diambil dari fungsi getRoomsCollectionPath
+            const roomsCollection = collection(db, getRoomsCollectionPath());
+            const q = query(roomsCollection); 
+
+            if (roomsListListener) roomsListListener(); // Hentikan listener lama
+
+            roomsListListener = onSnapshot(q, (snapshot) => {
+                roomsListContainer.innerHTML = '';
+                if (snapshot.empty) {
+                    roomsListContainer.innerHTML = '<p class="text-gray-500 text-center col-span-full">Belum ada room. Buat satu!</p>';
+                    return;
+                }
+                snapshot.forEach((doc) => {
+                    const room = doc.data();
+                    const roomId = doc.id;
+                    const playerCount = Object.keys(room.players || {}).length;
+                    
+                    const roomEl = document.createElement('div');
+                    roomEl.className = "p-4 bg-white border border-gray-200 rounded-lg shadow-sm flex justify-between items-center";
+                    roomEl.innerHTML = `
+                        <div>
+                            <h4 class="font-semibold text-lg text-indigo-700">${room.roomName || 'Room Tanpa Nama'}</h4>
+                            <p class="text-sm text-gray-600">Arena: ${room.arenaName} (${playerCount} pemain)</p>
+                            <p class="text-xs text-gray-400">Host: ${room.hostUsername || room.hostId}</p>
+                        </div>
+                        <button data-room-id="${roomId}" class="btn-join-list px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-all">Gabung</button>
+                    `;
+                    roomsListContainer.appendChild(roomEl);
+                });
+            }, (error) => {
+                console.error("Error mendengarkan daftar room:", error);
+            });
+        }
+
+        // Membuat room baru
+        async function handleCreateRoom() {
+            if (!isAuthReady || !userId || !username) {
+                console.error("Belum terhubung ke server atau nama belum diatur.");
+                return;
+            }
+            
+            const roomName = roomNameInput.value || `Room ${username}`;
+            const arenaName = arenaSelect.value;
+            const arenaData = ARENAS[arenaName];
+            
+            if (!arenaData) {
+                console.error("Pilih arena yang valid.");
+                return;
+            }
+
+            createRoomBtn.disabled = true;
+            createRoomBtn.textContent = "Membuat...";
+
+            const newRoomId = userId; // Host ID menjadi Room ID
+            const roomRef = doc(db, getRoomsCollectionPath(), newRoomId);
+
+            try {
+                await setDoc(roomRef, {
+                    hostId: userId,
+                    hostUsername: username, 
+                    roomName: roomName,
+                    arenaName: arenaName,
+                    gameStatus: "lobby", // lobby, racing, finished
+                    winnerId: null,
+                    createdAt: serverTimestamp(),
+                    players: {
+                        [userId]: { // Tambahkan host sebagai pemain pertama
+                            username: username, 
+                            isReady: false,
+                            code: "[]",
+                            statusMessage: "Menulis kode...",
+                            position: arenaData.start
+                        }
+                    }
+                });
+                
+                // Otomatis join room yang baru dibuat
+                await joinRoom(newRoomId);
+
+            } catch (e) {
+                console.error("Gagal membuat room:", e);
+            } finally {
+                createRoomBtn.disabled = false;
+                createRoomBtn.textContent = "Buat Room Baru";
+            }
+        }
+
+        // Bergabung ke room yang ada
+        async function joinRoom(roomId) {
+            if (!isAuthReady || !userId || !username) {
+                console.error("Belum terhubung ke server atau nama belum diatur.");
+                return;
+            }
+            if (!roomId) {
+                console.error("Room ID tidak valid.");
+                return;
+            }
+
+            const roomRef = doc(db, getRoomsCollectionPath(), roomId);
+            
+            try {
+                const roomDoc = await getDoc(roomRef);
+                if (!roomDoc.exists()) {
+                    console.error("Room tidak ditemukan!");
+                    return;
+                }
+
+                const roomData = roomDoc.data();
+                
+                // Cek jika room sudah penuh (misal batas 4 pemain)
+                if (Object.keys(roomData.players).length >= 4 && !roomData.players[userId]) {
+                    console.warn("Room sudah penuh!");
+                    return;
+                }
+                
+                // Cek jika game sudah dimulai
+                if (roomData.gameStatus !== 'lobby' && !roomData.players[userId]) {
+                    console.warn("Pertandingan sudah dimulai!");
+                    return;
+                }
+                
+                const arenaData = ARENAS[roomData.arenaName];
+                if (!arenaData) {
+                    console.error("Data arena untuk room ini tidak ditemukan!");
+                    return;
+                }
+
+                // Tambahkan pemain baru ke room (jika belum ada)
+                if (!roomData.players[userId]) {
+                    await updateDoc(roomRef, {
+                        [`players.${userId}`]: {
+                            username: username, 
+                            isReady: false,
+                            code: "[]",
+                            statusMessage: "Menulis kode...",
+                            position: arenaData.start
+                        }
+                    });
+                }
+                
+                // Berhenti mendengarkan daftar room
+                if (roomsListListener) roomsListListener(); 
+
+                // Mulai mendengarkan room spesifik ini
+                listenToRoom(roomId, arenaData, roomData.arenaName); // <-- Perhatikan arenaData
+                currentRoomId = roomId;
+                showView('game');
+
+            } catch (e) {
+                console.error("Gagal bergabung room:", e);
+            }
+        }
+        
+        // --- Logika Game (Multiplayer) ---
+        
+        // Mendengarkan perubahan data di satu room
+        function listenToRoom(roomId, arenaData, arenaName) { // <-- arenaData dan arenaName diterima
+            const roomRef = doc(db, getRoomsCollectionPath(), roomId);
+
+            // FIX: Gambar arena dan palet SATU KALI saat join
+            drawMaze(arenaData.maze); // Gunakan arenaData langsung
+            arenaTitle.textContent = `Arena: ${arenaName}`; // Set judul
+            populatePalette(['forward', 'left', 'right', 'repeat', 'repeat_forever', 'if', 'if_else', 'proc_def_1', 'proc_call_1']);
+
+            if (currentRoomListener) currentRoomListener(); // Hentikan listener lama
+
+            currentRoomListener = onSnapshot(roomRef, (doc) => {
+                if (!doc.exists()) {
+                    // Room dihapus oleh host
+                    console.warn("Room telah ditutup oleh Host.");
+                    leaveRoom(); // Keluar secara otomatis
+                    return;
+                }
+
+                localGameData = doc.data();
+                localGameData.id = doc.id;
+                
+                // FIX: Update judul arena jika berubah (meski seharusnya tidak)
+                arenaTitle.textContent = `Arena: ${localGameData.arenaName}`;
+
+                // 1. Render Status Pemain
+                renderPlayerStatus(localGameData.players);
+
+                // 2. Render Bot Pemain
+                renderPlayerBots(localGameData.players, arenaData.maze);
+
+                // 3. Update Status Game
+                handleGameStatusChange(localGameData);
+            });
+        }
+
+        // Menggambar arena (tanpa bot)
+        function drawMaze(MAZE) { // Terima MAZE secara langsung
+            if (!MAZE) {
+                console.error("Data maze tidak valid saat menggambar.");
+                return;
+            }
+            
+            const rows = MAZE.length;
+            const cols = MAZE[0].length;
+            
+            mazeGrid.style.setProperty('--maze-rows', rows);
+            mazeGrid.style.setProperty('--maze-cols', cols);
+            mazeGrid.innerHTML = '';
+            botsContainer.innerHTML = ''; // Kosongkan bot
+            playerBots = {}; // Reset cache bot
+
+            for (let y = 0; y < rows; y++) {
+                for (let x = 0; x < cols; x++) {
+                    const tile = document.createElement('div');
+                    tile.className = 'grid-tile';
+                    if (MAZE[y][x] === 1) tile.classList.add('wall');
+                    else if (MAZE[y][x] === 2) {
+                         tile.classList.add('finish');
+                         tile.innerHTML = '🏁';
+                    }
+                    else tile.classList.add('path');
+                    mazeGrid.appendChild(tile);
+                }
+            }
+        }
+        
+        // Merender semua bot pemain di arena
+        function renderPlayerBots(players, MAZE) { // Terima MAZE
+            const gridRect = mazeGrid.getBoundingClientRect();
+            if (gridRect.width === 0 || !MAZE) return;
+
+            const cols = MAZE[0].length;
+            const TILE_SIZE = gridRect.width / cols;
+            const PLAYER_SIZE = Math.max(16, Math.min(32, TILE_SIZE * 0.7)); 
+
+            let playerIndex = 0;
+            const playerIds = Object.keys(players).sort(); 
+
+            for (const pId of playerIds) { 
+                const player = players[pId];
+                if (!player) continue; 
+                
+                const { x, y, dir } = player.position;
+                const PLAYER_OFFSET = (TILE_SIZE - PLAYER_SIZE) / 2;
+
+                let botEl = playerBots[pId];
+                if (!botEl) {
+                    // Buat elemen bot baru jika belum ada
+                    botEl = document.createElement('div');
+                    botEl.id = pId;
+                    botEl.className = 'player-bot';
+                    const color = playerColors[playerIndex % playerColors.length];
+                    botEl.style.backgroundColor = color;
+                    botEl.style.boxShadow = `0 4px 12px ${color}80`; // Shadow dinamis
+                    botEl.innerHTML = `<span class="player-bot-emoji">➡️</span>`;
+                    botsContainer.appendChild(botEl);
+                    playerBots[pId] = botEl;
+                }
+                
+                // Update posisi dan rotasi
+                botEl.style.width = `${PLAYER_SIZE}px`;
+                botEl.style.height = `${PLAYER_SIZE}px`;
+                botEl.style.fontSize = `${PLAYER_SIZE * 0.6}px`;
+                botEl.style.left = `${x * TILE_SIZE + PLAYER_OFFSET}px`;
+                botEl.style.top = `${y * TILE_SIZE + PLAYER_OFFSET}px`;
+                
+                if (dir === 0) botEl.style.transform = 'rotate(-90deg)';
+                if (dir === 1) botEl.style.transform = 'rotate(0deg)';
+                if (dir === 2) botEl.style.transform = 'rotate(90deg)';
+                if (dir === 3) botEl.style.transform = 'rotate(180deg)';
+                
+                playerIndex++;
+            }
+            // Hapus bot jika pemain keluar
+            for (const pId in playerBots) {
+                if (!players[pId]) {
+                    playerBots[pId].remove();
+                    delete playerBots[pId];
+                }
+            }
+        }
+
+        // Merender daftar status pemain
+        function renderPlayerStatus(players) {
+            playerStatusList.innerHTML = '';
+            let allReady = true;
+
+            const playerIds = Object.keys(players).sort(); 
+            let playerIndex = 0;
+
+            for (const pId of playerIds) {
+                const player = players[pId];
+                if (!player) continue;
+                
+                const color = playerColors[playerIndex % playerColors.length];
+                const isHost = (pId === localGameData.hostId);
+                const isYou = (pId === userId);
+
+                if (!player.isReady) allReady = false;
+
+                const statusEl = document.createElement('div');
+                statusEl.className = `p-3 rounded-lg border-2 ${isYou ? 'bg-indigo-100 border-indigo-400' : 'bg-white border-gray-200'}`;
+                statusEl.innerHTML = `
+                    <div class="flex items-center justify-between">
+                        <span class="font-semibold" style="color: ${color};">
+                            ${player.username || 'Pemain'} ${isHost ? '(Host)' : ''} ${isYou ? '(Anda)' : ''}
+                        </span>
+                        <span class="text-sm font-medium px-2 py-0.5 rounded ${player.isReady ? 'bg-green-200 text-green-800' : 'bg-yellow-200 text-yellow-800'}">
+                            ${player.isReady ? 'Siap!' : 'Menunggu...'}
+                        </span>
+                    </div>
+                    <p class="text-sm text-gray-600 mt-1">${player.statusMessage || '&nbsp;'}</p>
+                `;
+                playerStatusList.appendChild(statusEl);
+                playerIndex++;
+            }
+            
+            // Atur tombol "Mulai Balapan"
+            if (userId === localGameData.hostId) {
+                btnStartRace.classList.remove('hidden');
+                btnStartRace.disabled = !allReady || localGameData.gameStatus !== 'lobby';
+            } else {
+                btnStartRace.classList.add('hidden');
+            }
+        }
+        
+        // Mengirim update status/data pemain ke Firestore
+        async function updateMyPlayerData(data) {
+            if (!currentRoomId || !userId) return;
+            const roomRef = doc(db, getRoomsCollectionPath(), currentRoomId);
+            
+            // Buat update key dinamis
+            const updates = {};
+            for (const key in data) {
+                updates[`players.${userId}.${key}`] = data[key];
+            }
+
+            try {
+                await updateDoc(roomRef, updates);
+            } catch (e) {
+                console.error("Gagal update data pemain:", e);
+            }
+        }
+        
+        // Mengirim update status room (oleh Host)
+        async function updateRoomData(data) {
+             if (!currentRoomId || userId !== localGameData.hostId) return;
+             const roomRef = doc(db, getRoomsCollectionPath(), currentRoomId);
+             try {
+                await updateDoc(roomRef, data);
+            } catch (e) {
+                console.error("Gagal update data room:", e);
+            }
+        }
+
+        // --- Logika Tombol Game ---
+        function handleReadyClick() {
+            const codeString = JSON.stringify(program.commands);
+            updateMyPlayerData({
+                isReady: true,
+                code: codeString,
+                statusMessage: "Siap!"
+            });
+            disableGameInput(true); // Kunci input setelah siap
+            btnReady.disabled = true;
+            btnReady.textContent = "Menunggu Pemain Lain...";
+        }
+        
+        function handleStartRaceClick() {
+            // Host menekan tombol
+            updateRoomData({ gameStatus: "racing" });
+        }
+
+        async function leaveRoom() {
+            if (currentRoomListener) currentRoomListener(); // Berhenti mendengarkan room
+            currentRoomListener = null;
+
+            if (currentRoomId && userId) {
+                const roomRef = doc(db, getRoomsCollectionPath(), currentRoomId);
+                
+                // Jika host keluar, hapus room. Jika pemain, hapus diri sendiri.
+                if (localGameData.hostId === userId) {
+                    await deleteDoc(roomRef).catch(e => console.error("Gagal hapus room:", e));
+                } else {
+                    // Hapus pemain dari map menggunakan deleteField()
+                    await updateDoc(roomRef, {
+                        [`players.${userId}`]: deleteField() 
+                    }).catch(e => console.error("Gagal keluar room:", e));
+                }
+            }
+
+            currentRoomId = null;
+            localGameData = {};
+            program.commands = [];
+            fullRerenderAndReinit();
+            
+            showView('lobby');
+            listenToRoomsList(); // Mulai dengarkan lobi lagi
+        }
+        
+        // Kunci/Buka input editor
+        function disableGameInput(disabled) {
+            isRunning = disabled;
+            sortableInstances.forEach(s => s.option('disabled', disabled));
+            if(paletteSortable) paletteSortable.option('disabled', disabled);
+            programContainer.querySelectorAll('.btn-delete-cmd, .condition-select').forEach(el => {
+                 el.disabled = disabled;
+            });
+        }
+        
+        // --- Logika Eksekusi Program (Multiplayer) ---
+        
+        // Dipanggil oleh onSnapshot ketika gameStatus berubah
+        function handleGameStatusChange(data) {
+            gameStatusMessage.classList.add('hidden'); // Sembunyikan default
+
+            if (data.gameStatus === 'lobby') {
+                // Cek apakah kita sudah 'siap'
+                const myData = data.players[userId];
+                if (myData && myData.isReady) {
+                    disableGameInput(true);
+                    btnReady.disabled = true;
+                    btnReady.textContent = "Menunggu Pemain Lain...";
+                } else {
+                    disableGameInput(false);
+                    btnReady.disabled = false;
+                    btnReady.textContent = "Siap!";
+                }
+                btnReady.classList.remove('hidden');
+            } 
+            else if (data.gameStatus === 'racing') {
+                disableGameInput(true);
+                btnReady.classList.add('hidden');
+                btnStartRace.classList.add('hidden');
+                
+                // Cek apakah kita sudah 'selesai'
+                const myData = data.players[userId];
+                if (myData && myData.statusMessage !== "Selesai!" && myData.statusMessage !== "Menabrak!") {
+                    // Mulai balapan untuk klien ini
+                    runMyProgram();
+                }
+            }
+            else if (data.gameStatus === 'finished') {
+                disableGameInput(true);
+                btnReady.classList.add('hidden');
+                btnStartRace.classList.add('hidden');
+                executionAbort = true; // Hentikan eksekusi jika sedang berjalan
+
+                // Tampilkan pemenang
+                const winnerData = data.players[data.winnerId];
+                const winnerName = winnerData ? winnerData.username : 'Pemenang';
+                gameStatusMessage.textContent = `Balapan Selesai! Pemenang: ${winnerName} ${data.winnerId === userId ? '(Anda!)' : ''}`;
+                gameStatusMessage.className = "text-xl font-bold text-center text-green-600 mb-4";
+                gameStatusMessage.classList.remove('hidden');
+            }
+        }
+
+        async function runMyProgram() {
+            if (!localGameData.arenaName) return;
+            
+            const arena = ARENAS[localGameData.arenaName];
+            const myData = localGameData.players[userId];
+            if (!myData) return; // Keluar jika data kita tidak ada
+            
+            const myCode = JSON.parse(myData.code || "[]");
+            
+            // Reset posisi lokal
+            localPlayerState = { ...arena.start };
+            
+            executionAbort = false;
+            
+            // Update status di DB
+            await updateMyPlayerData({ statusMessage: "Mulai..." });
+
+            try {
+                await executeCommandList(myCode, arena.maze);
+                
+                if (!executionAbort) {
+                    const { x, y } = localPlayerState;
+                    if (arena.maze[y][x] !== 2) {
+                        throw new Error("Belum sampai di finish!");
+                    }
+                }
+
+            } catch (error) {
+                if (!executionAbort) {
+                    console.warn("Player error:", error.message);
+                    await updateMyPlayerData({ statusMessage: "Menabrak!" });
+                }
+            }
+        }
+
+        // Fungsi rekursif untuk eksekusi
+        async function executeCommandList(commandList, MAZE) {
+            for (const cmd of commandList) {
+                // Cek status game terbaru dari data lokal yang disinkronkan
+                if (executionAbort || localGameData.gameStatus === 'finished') {
+                    throw new Error("Balapan dihentikan.");
+                }
+                
+                if (cmd.type === 'proc_def_1') continue;
+
+                // Highlight HANYA di UI lokal
+                highlightCommand(cmd.id);
+                await sleep(300); // Kecepatan eksekusi
+
+                if (cmd.type === 'forward') {
+                    let { x, y, dir } = localPlayerState;
+                    if (dir === 0) y--;
+                    if (dir === 1) x++;
+                    if (dir === 2) y++;
+                    if (dir === 3) x--;
+                    
+                    if (MAZE[y] === undefined || MAZE[y][x] === undefined || MAZE[y][x] === 1) {
+                        if (soundsReady && wallSound) wallSound.triggerAttackRelease("C2", "0.2", Tone.now());
+                        throw new Error("Menabrak!");
+                    }
+                    
+                    localPlayerState.x = x;
+                    localPlayerState.y = y;
+                    
+                    // KIRIM POSISI BARU KE FIREBASE
+                    await updateMyPlayerData({ position: localPlayerState }); 
+                    
+                    if (soundsReady && moveSound) moveSound.triggerAttackRelease("C4", "0.1", Tone.now());
+                    
+                    if (MAZE[y][x] === 2) { 
+                        // MENANG!
+                        executionAbort = true;
+                        await updateMyPlayerData({ statusMessage: "Selesai!" });
+                        
+                        // Klaim kemenangan (hanya jika belum ada pemenang)
+                        // Perlu cek ulang data terbaru
+                        const roomRef = doc(db, getRoomsCollectionPath(), currentRoomId);
+                        const roomDoc = await getDoc(roomRef);
+                        if (roomDoc.exists() && roomDoc.data().gameStatus === 'racing') {
+                            await updateRoomData({ 
+                                winnerId: userId,
+                                gameStatus: 'finished'
+                            });
+                        }
+                        return;
+                    }
+                } 
+                else if (cmd.type === 'left') {
+                    localPlayerState.dir = (localPlayerState.dir - 1 + 4) % 4;
+                    await updateMyPlayerData({ position: localPlayerState });
+                    if (soundsReady && turnSound) turnSound.triggerAttackRelease("0.05", Tone.now(), 0.1);
+                } 
+                else if (cmd.type === 'right') {
+                    localPlayerState.dir = (localPlayerState.dir + 1) % 4;
+                    await updateMyPlayerData({ position: localPlayerState });
+                    if (soundsReady && turnSound) turnSound.triggerAttackRelease("0.05", Tone.now(), 0.1);
+                }
+                else if (cmd.type === 'repeat') {
+                    for (let i = 0; i < cmd.times; i++) {
+                        await executeCommandList(cmd.commands, MAZE);
+                        if (executionAbort || localGameData.gameStatus === 'finished') return;
+                    }
+                }
+                else if (cmd.type === 'repeat_forever') {
+                    let loopCount = 0;
+                    while (loopCount < 200) {
+                        await executeCommandList(cmd.commands, MAZE);
+                        if (executionAbort || localGameData.gameStatus === 'finished') return;
+                        await sleep(100);
+                        loopCount++;
+                    }
+                    if(!executionAbort) throw new Error("Program terlalu panjang!");
+                }
+                else if (cmd.type === 'if') {
+                    if (checkCondition(localPlayerState, MAZE, cmd.condition)) {
+                        await executeCommandList(cmd.commands, MAZE);
+                        if (executionAbort || localGameData.gameStatus === 'finished') return;
+                    }
+                }
+                else if (cmd.type === 'if_else') {
+                    if (checkCondition(localPlayerState, MAZE, cmd.condition)) {
+                        await executeCommandList(cmd.commands, MAZE);
+                    } else {
+                        await executeCommandList(cmd.elseCommands, MAZE);
+                    }
+                    if (executionAbort || localGameData.gameStatus === 'finished') return;
+                }
+                else if (cmd.type === 'proc_call_1') {
+                    // Cari definisi fungsi di KODE LOKAL (program.commands)
+                    const funcDef = findCommandByType(program.commands, 'proc_def_1');
+                    if (funcDef && funcDef.commands) {
+                        await executeCommandList(funcDef.commands, MAZE);
+                        if (executionAbort || localGameData.gameStatus === 'finished') return;
+                    }
+                }
+                
+                if (localGameData.gameStatus !== 'finished') {
+                   await sleep(200); // Jeda antar blok
+                }
+            }
+        }
+        
+        // Cek kondisi (versi multiplayer)
+        function checkCondition(playerState, MAZE, condition) {
+            let { x, y, dir } = playerState;
+            let checkDir = dir;
+            if (condition === 'path_left') checkDir = (dir - 1 + 4) % 4;
+            else if (condition === 'path_right') checkDir = (dir + 1) % 4;
+            if (checkDir === 0) y--;
+            if (checkDir === 1) x++;
+            if (checkDir === 2) y++;
+            if (checkDir === 3) x--;
+            return MAZE[y] !== undefined && MAZE[y][x] !== undefined && MAZE[y][x] !== 1;
+        }
+
+
+        // --- Logika Drag/Drop Lokal (Sama seperti sebelumnya) ---
+        function highlightCommand(cmdId) {
+            document.querySelectorAll('.executing').forEach(el => el.classList.remove('executing'));
+            const el = document.querySelector(`[data-id="${cmdId}"]`);
+            if (el) {
+                el.classList.add('executing');
+                el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+        }
+        
+        function populatePalette(allowedBlocks) {
+            if (paletteSortable) paletteSortable.destroy();
+            paletteControls.innerHTML = '';
+            allowedBlocks.forEach(blockType => {
+                const blockDef = BLOCK_DEFINITIONS[blockType];
+                if (blockDef) {
+                    const el = document.createElement('div');
+                    el.className = blockDef.colSpan;
+                    el.innerHTML = blockDef.html;
+                    paletteControls.appendChild(el.firstElementChild);
+                }
+            });
+            paletteSortable = new Sortable(paletteControls, {
+                group: { name: 'commands', pull: 'clone', put: false },
+                animation: 150,
+                sort: false,
+                onClone: (evt) => { initSounds(); }
+            });
+        }
+        
+        function renderProgram(container, commandList) {
+            container.innerHTML = ''; 
+            commandList.forEach(cmd => {
+                const el = createBlockElement(cmd);
+                container.appendChild(el);
+                if (cmd.type === 'repeat' || cmd.type === 'repeat_forever' || cmd.type === 'proc_def_1') { 
+                    const contentEl = el.querySelector('.cmd-block-content');
+                    if (contentEl) renderProgram(contentEl, cmd.commands);
+                } else if (cmd.type === 'if') {
+                    const contentEl = el.querySelector('.cmd-block-content');
+                    if (contentEl) renderProgram(contentEl, cmd.commands);
+                } else if (cmd.type === 'if_else') {
+                    const ifContentEl = el.querySelector('.cmd-block-content[data-type="if"]');
+                    const elseContentEl = el.querySelector('.cmd-block-content[data-type="else"]');
+                    if (ifContentEl) renderProgram(ifContentEl, cmd.commands);
+                    if (elseContentEl) renderProgram(elseContentEl, cmd.elseCommands);
+                }
+            });
+            initSortable(container, commandList);
+        }
+
+        function createBlockElement(cmd) {
+            const el = document.createElement('div');
+            el.className = 'cmd-block';
+            el.dataset.id = cmd.id;
+            let contentHTML = `<button class="btn-delete-cmd" title="Hapus">✖</button>`;
+            if (cmd.type === 'forward') {
+                el.classList.add('bg-cmd-forward');
+                contentHTML += '⬆️ Maju';
+            } else if (cmd.type === 'left') {
+                el.classList.add('bg-cmd-left');
+                contentHTML += '↪️ Kiri';
+            } else if (cmd.type === 'right') {
+                el.classList.add('bg-cmd-right');
+                contentHTML += '↩️ Kanan';
+            } else {
+                el.classList.add('is-container');
+                if (cmd.type === 'repeat') {
+                    el.classList.add('bg-cmd-repeat');
+                    contentHTML += `Ulangi ${cmd.times}x:`;
+                    contentHTML += `<div class="cmd-block-content" data-id="${cmd.id}-content"></div>`;
+                } else if (cmd.type === 'repeat_forever') {
+                    el.classList.add('bg-cmd-repeat_forever');
+                    contentHTML += `Ulangi Terus Menerus:`;
+                    contentHTML += `<div class="cmd-block-content" data-id="${cmd.id}-content"></div>`;
+                } else if (cmd.type === 'if') {
+                    el.classList.add('bg-cmd-if');
+                    contentHTML += `Jika ${createConditionDropdown(cmd)}:`;
+                    contentHTML += `<div class="cmd-block-content" data-id="${cmd.id}-content"></div>`;
+                } else if (cmd.type === 'if_else') {
+                    el.classList.add('bg-cmd-if_else');
+                    contentHTML += `Jika ${createConditionDropdown(cmd)}:`;
+                    contentHTML += `<div class="cmd-block-content" data-type="if" data-id="${cmd.id}-content"></div>`;
+                    contentHTML += `<div class="mt-2 pt-2 border-t border-white/30">Lainnya:</div>`;
+                    contentHTML += `<div class="cmd-block-content" data-type="else" data-id="${cmd.id}-else-content"></div>`;
+                } else if (cmd.type === 'proc_def_1') {
+                    el.classList.add('is-container');
+                    el.classList.add('bg-pink-500');
+                    contentHTML += `Definisi ${cmd.name}:`;
+                    contentHTML += `<div class="cmd-block-content" data-id="${cmd.id}-content"></div>`;
+                } else if (cmd.type === 'proc_call_1') {
+                    el.classList.add('bg-pink-400');
+                    contentHTML += `Jalankan ${cmd.name}`;
+                }
+            }
+            el.innerHTML = contentHTML;
+            return el;
+        }
+        
+        function createConditionDropdown(cmd) {
+            const stopPropagation = `event.stopPropagation();`;
+            return `
+                <select class="condition-select bg-white/20 rounded ml-1 text-black" 
+                        data-id="${cmd.id}" 
+                        onmousedown="${stopPropagation}" 
+                        ontouchstart="${stopPropagation}">
+                    <option value="path_ahead" ${cmd.condition === 'path_ahead' ? 'selected' : ''}>Jalan di Depan</option>
+                    <option value="path_left" ${cmd.condition === 'path_left' ? 'selected' : ''}>Jalan di Kiri</option>
+                    <option value="path_right" ${cmd.condition === 'path_right' ? 'selected' : ''}>Jalankan di Kanan</option>
+                </select>
+            `;
+        }
+        
+        function destroySortables() {
+            sortableInstances.forEach(s => s.destroy());
+            sortableInstances = [];
+        }
+
+        function initSortable(container, commandList) {
+            const instance = new Sortable(container, {
+                group: 'commands',
+                animation: 150,
+                ghostClass: 'sortable-ghost',
+                onAdd: (evt) => {
+                    const el = evt.item;
+                    const blockDataJSON = el.dataset.blockData;
+                    if (!blockDataJSON) {
+                        const cmdId = el.dataset.id;
+                        const blockData = findAndRemoveCommand(program.commands, cmdId);
+                        if (blockData) commandList.splice(evt.newIndex, 0, blockData);
+                    } else {
+                        const newBlockData = JSON.parse(blockDataJSON);
+                        newBlockData.id = generateUUID();
+                        const newEl = createBlockElement(newBlockData);
+                        el.parentNode.replaceChild(newEl, el);
+                        commandList.splice(evt.newIndex, 0, newBlockData);
+                    }
+                    fullRerenderAndReinit();
+                },
+                onUpdate: (evt) => {
+                    const item = commandList.splice(evt.oldIndex, 1)[0];
+                    commandList.splice(evt.newIndex, 0, item);
+                    fullRerenderAndReinit();
+                },
+                onRemove: (evt) => {
+                    if (evt.item.parentNode) {
+                        findAndRemoveCommand(commandList, evt.item.dataset.id);
+                    }
+                    fullRerenderAndReinit();
+                }
+            });
+            sortableInstances.push(instance);
+        }
+
+        function findAndRemoveCommand(commandList, id) {
+            for (let i = 0; i < commandList.length; i++) {
+                const cmd = commandList[i];
+                if (cmd.id === id) return commandList.splice(i, 1)[0];
+                if (cmd.commands) {
+                    const found = findAndRemoveCommand(cmd.commands, id);
+                    if (found) return found;
+                }
+                if (cmd.elseCommands) {
+                    const found = findAndRemoveCommand(cmd.elseCommands, id);
+                    if (found) return found;
+                }
+                if (cmd.type === 'proc_def_1' && cmd.commands) {
+                     const found = findAndRemoveCommand(cmd.commands, id);
+                    if (found) return found;
+                }
+            }
+            return null;
+        }
+        
+        function fullRerenderAndReinit() {
+            destroySortables();
+            renderProgram(programContainer, program.commands);
+        }
+
+        programContainer.addEventListener('click', (e) => {
+            if (isRunning) return;
+            const deleteBtn = e.target.closest('.btn-delete-cmd');
+            if (deleteBtn) {
+                e.stopPropagation();
+                const blockEl = e.target.closest('.cmd-block');
+                findAndRemoveCommand(program.commands, blockEl.dataset.id);
+                fullRerenderAndReinit();
+            }
+        });
+        
+        programContainer.addEventListener('change', (e) => {
+             if (isRunning) return;
+            const select = e.target.closest('.condition-select');
+            if (select) {
+                const cmdId = select.dataset.id;
+                const newCondition = select.value;
+                function findAndUpdate(commandList, id, newCond) {
+                    for (const cmd of commandList) {
+                        if (cmd.id === id) {
+                            cmd.condition = newCond;
+                            return true;
+                        }
+                        if (cmd.commands && findAndUpdate(cmd.commands, id, newCond)) return true;
+                        if (cmd.elseCommands && findAndUpdate(cmd.elseCommands, id, newCond)) return true;
+                    }
+                    return false;
+                }
+                findAndUpdate(program.commands, cmdId, newCondition);
+            }
+        });
+        
+        // --- Inisialisasi Event Listeners Global ---
+        btnSetUsername.addEventListener('click', handleSetUsername); 
+        createRoomBtn.addEventListener('click', handleCreateRoom);
+        joinRoomBtn.addEventListener('click', () => {
+            const roomId = joinRoomInput.value.trim();
+            if (roomId) joinRoom(roomId);
+            else console.error("Masukkan ID Host untuk bergabung.");
+        });
+        roomsListContainer.addEventListener('click', (e) => {
+            const joinButton = e.target.closest('.btn-join-list');
+            if (joinButton) {
+                joinRoom(joinButton.dataset.roomId);
+            }
+        });
+        
+        btnReady.addEventListener('click', handleReadyClick);
+        btnStartRace.addEventListener('click', handleStartRaceClick);
+        btnLeaveRoom.addEventListener('click', leaveRoom);
+        
+        // --- Inisialisasi Arena Select ---
+        function populateArenaSelect() {
+            arenaSelect.innerHTML = '';
+            for (const arenaName in ARENAS) {
+                const option = document.createElement('option');
+                option.value = arenaName;
+                option.textContent = arenaName;
+                arenaSelect.appendChild(option);
+            }
+        }
+        
+        // --- Mulai Aplikasi ---
+        populateArenaSelect();
+        initFirebase();
+        
+    </script>
+
+    <style>
+        /* CSS tambahan untuk multiplayer */
+        html { height: 100%; }
+        body {
+            height: 100%;
+            overflow-x: hidden;
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
+            font-family: 'Inter', sans-serif;
+            background: linear-gradient(-45deg, #e0e7ff, #f3f4f6, #c7d2fe, #e0e7ff);
+            background-size: 400% 400%;
+            animation: gradientBG 15s ease infinite;
+            display: flex;
+            flex-direction: column; 
+            align-items: center;
+            justify-content: center;
+            padding: 0.5rem; /* p-2 */
+            sm:padding: 1rem; /* sm:p-4 */
+            min-height: 100%;
+        }
+
+        @keyframes gradientBG {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+        
+        /* Bot Pemain (BARU) */
+        .player-bot {
+            position: absolute;
+            width: var(--player-size, 32px); 
+            height: var(--player-size, 32px);
+            font-size: calc(var(--player-size, 32px) * 0.6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 2px solid #ffffff;
+            border-radius: 9999px;
+            transition: all 0.2s ease-in-out;
+            transform-origin: center center;
+            z-index: 10;
+        }
+        .player-bot-emoji {
+             line-height: 1;
+             filter: grayscale(100%) brightness(200%); /* Membuat emoji putih */
+        }
+        
+        /* Area Labirin */
+        #maze-grid {
+            display: grid;
+            background-color: #f3f4f6; 
+            border: 1px solid #d1d5db;
+            border-radius: 0.5rem;
+            overflow: hidden;
+            box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.05);
+            grid-template-columns: repeat(var(--maze-cols, 5), minmax(0, 1fr));
+            grid-template-rows: repeat(var(--maze-rows, 5), minmax(0, 1fr));
+            width: 100%;
+            aspect-ratio: 1 / 1;
+        }
+        
+        .grid-tile {
+            width: 100%; height: 100%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: clamp(1.25rem, 6vw, 2rem);
+            line-height: 1;
+            transition: background-color 0.3s ease;
+        }
+        
+        .wall { 
+            background-color: #4b5563;
+            background-image: linear-gradient(to top right, #4b5563, #374151);
+        }
+        .path { background-color: #ffffff; }
+        .finish { 
+            background-color: #22c55e;
+            background-image: linear-gradient(to top right, #22c55e, #16a34a);
+        }
+        
+        /* Blok Perintah */
+        .cmd-block {
+            position: relative;
+            padding: 0.75rem;
+            border-radius: 0.75rem;
+            color: white;
+            font-weight: 600;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1), 
+                        0 4px 8px rgba(0,0,0,0.1), 
+                        inset 0 1px 1px rgba(255,255,255,0.2);
+            cursor: grab;
+            transition: all 0.15s ease-out;
+            border-bottom: 3px solid rgba(0,0,0,0.2);
+        }
+        .cmd-block:active { 
+            cursor: grabbing; 
+            transform: scale(0.95);
+            box-shadow: inset 0 2px 4px 0 rgba(0,0,0,0.1);
+            border-bottom-width: 1px;
+        }
+        #palette-controls .cmd-block:hover { transform: scale(1.05); }
+
+        #program-container {
+            background-color: rgba(255, 255, 255, 0.7);
+            border: 2px dashed #d1d5db;
+            border-radius: 0.5rem;
+            padding: 0.75rem;
+            overflow-y: auto;
+            min-height: 150px;
+            max-height: 20rem; /* max-h-80 */
+            md:max-h-[60vh];
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        
+        .cmd-block.is-container { padding-bottom: 0.5rem; }
+        .cmd-block-content {
+            background-color: rgba(255, 255, 255, 0.2);
+            border-radius: 0.5rem;
+            padding: 0.5rem;
+            margin-top: 0.5rem;
+            min-height: 40px;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        /* Warna Blok Gradien */
+        .bg-cmd-forward { background-image: linear-gradient(to top right, #22c55e, #16a34a); border-bottom-color: #15803d; }
+        .bg-cmd-left, .bg-cmd-right { background-image: linear-gradient(to top right, #3b82f6, #2563eb); border-bottom-color: #1d4ed8; }
+        .bg-cmd-repeat { background-image: linear-gradient(to top right, #eab308, #d97706); border-bottom-color: #b45309; }
+        .bg-cmd-repeat_forever { background-image: linear-gradient(to top right, #f59e0b, #ea580c); border-bottom-color: #c2410c; }
+        .bg-cmd-if, .bg-cmd-if_else { background-image: linear-gradient(to top right, #8b5cf6, #7c3aed); border-bottom-color: #6d28d9; }
+        .bg-cmd-if_else { background-image: linear-gradient(to top right, #a855f7, #9333ea); border-bottom-color: #7e22ce; }
+        .bg-pink-500 { background-image: linear-gradient(to top right, #ec4899, #d946ef); border-bottom-color: #c026d3; }
+        .bg-pink-400 { background-image: linear-gradient(to top right, #f472b6, #e879f9); border-bottom-color: #d946ef; }
+
+        /* Tombol Hapus */
+        .btn-delete-cmd {
+            position: absolute;
+            top: -0.5rem; right: -0.5rem;
+            padding: 0.375rem;
+            font-size: 0.75rem;
+            line-height: 1;
+            font-weight: bold;
+            color: #ef4444;
+            background-color: #fee2e2;
+            border: 2px solid #ef4444;
+            border-radius: 9999px;
+            cursor: pointer;
+            transition: all 0.2s;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            z-index: 20;
+        }
+        .btn-delete-cmd:hover {
+            background-color: #ef4444;
+            color: #ffffff;
+            transform: scale(1.1);
+        }
+
+        .sortable-ghost { opacity: 0.4; background: #9ca3af; border-radius: 0.75rem; }
+        .sortable-clone { opacity: 0.8; transform: rotate(2deg); }
+
+        .executing { animation: pulse-animation 0.5s infinite alternate; }
+        @keyframes pulse-animation {
+            from { transform: scale(1.05); box-shadow: 0 0 0 5px rgba(59, 130, 246, 0.7); }
+            to { transform: scale(1.0); box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+        }
+    </style>
+</head>
+<body class="min-h-screen">
+
+    <!-- Tampilan Loading -->
+    <div id="loading-view" class="text-center">
+        <h1 class="text-2xl font-semibold text-gray-700">Menghubungkan ke SIJIBOX Arena...</h1>
+        <p class="text-gray-500">Mohon tunggu.</p>
+    </div>
+    
+    <!-- BARU: Tampilan Nama Pengguna -->
+    <div id="username-view" class="hidden w-full max-w-md mx-auto">
+        <div class="bg-white/95 backdrop-blur-sm rounded-2xl shadow-xl p-6 md:p-8 text-center">
+            <h1 class="text-2xl font-bold text-gray-800 mb-4">Selamat Datang di SIJIBOX Arena!</h1>
+            <label for="username-input" class="block text-sm font-medium text-gray-700 mb-2">Masukkan Nama Pengguna Anda:</label>
+            <input type="text" id="username-input" placeholder="Nama Anda..." class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" maxlength="20">
+            <button id="btn-set-username" class="mt-4 w-full px-6 py-3 bg-indigo-600 text-white font-semibold rounded-xl shadow-lg hover:bg-indigo-700 transition-all transform hover:scale-105 active:scale-95 disabled:opacity-50">
+                Masuk
+            </button>
+        </div>
+    </div>
+
+
+    <!-- Tampilan Lobi -->
+    <div id="lobby-view" class="hidden w-full max-w-3xl mx-auto">
+        <div class="bg-white/95 backdrop-blur-sm rounded-2xl shadow-xl p-6 md:p-8">
+            <h1 class="text-3xl sm:text-4xl font-bold text-center text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-purple-600 mb-1">SIJIBOX Arena</h1>
+            <!-- BARU: Tampilan Nama dan ID -->
+            <div class="text-center text-gray-600 mb-6 font-medium text-sm bg-gray-100 p-2 rounded">
+                 <span id="username-display" class="font-bold">Nama: Memuat...</span> | 
+                 <span id="user-id-display" class="text-xs">ID: Memuat...</span>
+            </div>
+
+            <!-- Opsi Buat / Gabung -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                <!-- Buat Room -->
+                <div class="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                    <h2 class="text-xl font-semibold text-gray-800 mb-3">Buat Room Baru</h2>
+                    <label for="room-name-input" class="block text-sm font-medium text-gray-700">Nama Room:</label>
+                    <input type="text" id="room-name-input" placeholder="Misal: Kamar 12" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                    
+                    <label for="arena-select" class="block text-sm font-medium text-gray-700 mt-3">Pilih Arena:</label>
+                    <select id="arena-select" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                        <!-- Opsi arena diisi oleh JS -->
+                    </select>
+
+                    <button id="btn-create-room" class="mt-4 w-full px-6 py-3 bg-indigo-600 text-white font-semibold rounded-xl shadow-lg hover:bg-indigo-700 transition-all transform hover:scale-105 active:scale-95 disabled:opacity-50">
+                        Buat Room Baru
+                    </button>
+                </div>
+                <!-- Gabung Room -->
+                <div class="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                    <h2 class="text-xl font-semibold text-gray-800 mb-3">Gabung Room</h2>
+                    <label for="join-room-input" class="block text-sm font-medium text-gray-700">Masukkan ID Host:</label>
+                    <input type="text" id="join-room-input" placeholder="Tempel ID Host di sini" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                    <button id="btn-join-room" class="mt-4 w-full px-6 py-3 bg-green-600 text-white font-semibold rounded-xl shadow-lg hover:bg-green-700 transition-all transform hover:scale-105 active:scale-95 disabled:opacity-50">
+                        Gabung
+                    </button>
+                </div>
+            </div>
+
+            <!-- Daftar Room Aktif -->
+            <h2 class="text-2xl font-semibold text-gray-800 mb-4 text-center">Daftar Room Aktif</h2>
+            <div id="rooms-list" class="grid grid-cols-1 gap-3 max-h-64 overflow-y-auto p-2 bg-gray-100 rounded-lg">
+                <!-- Daftar room diisi oleh JS -->
+                <p class="text-gray-500 text-center col-span-full">Memuat room...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tampilan Game -->
+    <div id="game-view" class="hidden bg-white/95 backdrop-blur-sm rounded-2xl shadow-xl sm:shadow-2xl p-4 sm:p-6 md:p-8 w-full max-w-5xl mx-auto">
+        
+        <div class="flex justify-between items-center mb-4">
+             <h1 class="text-3xl sm:text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-purple-600">SIJIBOX Arena</h1>
+             <button id="btn-leave-room" class="px-4 py-2 bg-gray-500 text-white text-sm font-semibold rounded-lg hover:bg-gray-600 transition-all">Keluar Room</button>
+        </div>
+        
+        <p id="game-status-message" class="hidden text-xl font-bold text-center text-blue-600 mb-4"></p>
+        
+        <!-- Konten Utama (Layout Responsif) -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8">
+            
+            <!-- Kolom Kiri: Labirin dan Kontrol -->
+            <div class="flex flex-col items-center">
+                
+                <h2 id="arena-title" class="text-xl sm:text-2xl font-semibold text-indigo-600 mb-4">Memuat Arena...</h2>
+
+                <!-- Area Labirin (Relatif untuk Pemain) -->
+                <div class="relative mb-4 w-full max-w-xs sm:max-w-sm">
+                    <div id="maze-grid">
+                        <!-- Petak labirin akan di-generate oleh JS di sini -->
+                    </div>
+                    <!-- BARU: Kontainer untuk SEMUA bot -->
+                    <div id="bots-container">
+                        <!-- Bot akan di-generate oleh JS di sini -->
+                    </div>
+                </div>
+                
+                <!-- Status Pemain (BARU) -->
+                <div class="w-full max-w-xs sm:max-w-sm mb-4">
+                    <h3 class="text-lg font-semibold text-gray-900 mb-2">Status Pemain:</h3>
+                    <div id="player-status-list" class="space-y-2">
+                        <!-- Status diisi oleh JS -->
+                    </div>
+                </div>
+
+                <!-- Kontrol Balapan (BARU) -->
+                <div id="race-controls" class="flex space-x-4 mb-4">
+                    <button id="btn-ready" class="px-8 py-3 bg-blue-600 text-white font-semibold rounded-xl shadow-lg hover:bg-blue-700 transition-all transform hover:scale-105 active:scale-95 disabled:opacity-50">
+                        Siap!
+                    </button>
+                    <button id="btn-start-race" class="hidden px-8 py-3 bg-green-600 text-white font-semibold rounded-xl shadow-lg hover:bg-green-700 transition-all transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:hover:scale-100">
+                        Mulai Balapan!
+                    </button>
+                </div>
+
+            </div>
+            
+            <!-- Kolom Kanan: Editor Program -->
+            <div class="bg-gray-50/70 p-4 sm:p-6 rounded-2xl shadow-inner">
+                
+                <h3 class="text-lg font-semibold text-gray-900 mb-2">Palette Perintah:</h3>
+                <div id="palette-controls" class="grid grid-cols-3 gap-3 sm:gap-4 mb-4">
+                    <!-- Blok akan di-generate oleh JS -->
+                </div>
+
+                <h2 class="text-xl sm:text-2xl font-semibold text-gray-900 mb-2">Program Anda:</h2>
+                
+                <div id="program-container">
+                    <!-- Perintah akan dirender oleh JS di sini -->
+                </div>
+
+            </div> <!-- Akhir Kolom Kanan -->
+            
+        </div> <!-- Akhir Layout 2 Kolom -->
+        
+        <!-- Copyright -->
+        <div class="mt-6 pt-4 border-t border-gray-200">
+            <p class="text-center text-sm text-gray-400 transition-all duration-300 hover:text-gray-600 cursor-default">
+                FOOTAGE : copyright @ akhmad samsudin guru TIK SMP Negeri 1 Pasuruan
+            </p>
+        </div>
+
+    </div> <!-- Akhir Kontainer Game -->
+
+</body>
+</html>
