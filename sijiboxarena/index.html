@@ -38,7 +38,8 @@
         // --- Variabel Global Firebase ---
         let db, auth;
         let userId = null;
-        let username = null; 
+        // --- PERUBAHAN: Muat username dari localStorage ---
+        let username = localStorage.getItem('sijibox_username') || null; 
         let isAuthReady = false;
         let currentRoomId = null;
         let currentRoomListener = null; // Untuk unsubscribe snapshot
@@ -81,6 +82,8 @@
         const joinRoomBtn = document.getElementById('btn-join-room');
         const roomsListContainer = document.getElementById('rooms-list');
         const arenaSelect = document.getElementById('arena-select');
+        const historyListContainer = document.getElementById('history-list'); // BARU: Histori
+        const btnClearHistory = document.getElementById('btn-clear-history'); // BARU: Histori
 
         // DOM Game
         const mazeGrid = document.getElementById('maze-grid');
@@ -91,9 +94,11 @@
         const programContainer = document.getElementById('program-container');
         const btnReady = document.getElementById('btn-ready');
         const btnStartRace = document.getElementById('btn-start-race');
-        const btnLeaveRoom = document.getElementById('btn-leave-room');
+        const btnLogout = document.getElementById('btn-logout'); // PERUBAHAN: Ganti nama
+        const btnBackToLobby = document.getElementById('btn-back-to-lobby'); // BARU
         const gameStatusMessage = document.getElementById('game-status-message');
-        const btnResetProgram = document.getElementById('btn-reset-program'); // BARU
+        const btnResetProgram = document.getElementById('btn-reset-program');
+        const gameRoomIdDisplay = document.getElementById('game-room-id-display'); // BARU: Tampilan ID Room
         
         // --- FIX: Fungsi generateUUID (yang hilang) ---
         function generateUUID() {
@@ -225,12 +230,6 @@
         }
 
         // --- PERBAIKAN: Fungsi findCommandByType (mencari fungsi) yang hilang ---
-        /**
-         * Mencari command pertama dalam list berdasarkan tipe (rekursif).
-         * @param {Array} commandList - Daftar perintah untuk dicari.
-         * @param {string} type - Tipe command yang dicari (misal: 'proc_def_1').
-         * @returns {Object|null} - Command yang ditemukan atau null.
-         */
         function findCommandByType(commandList, type) {
             if (!commandList) return null;
             for (const cmd of commandList) {
@@ -261,6 +260,71 @@
             if (viewId === 'username') usernameView.classList.remove('hidden'); 
             if (viewId === 'lobby') lobbyView.classList.remove('hidden');
             if (viewId === 'game') gameView.classList.remove('hidden');
+        }
+
+        // --- BARU: Helper untuk menampilkan Lobi ---
+        function showLobby() {
+            if (!userId || !username) {
+                console.error("Tidak bisa menampilkan lobi, user atau nama tidak ada.");
+                showView('username'); // Fallback
+                return;
+            }
+            sessionStorage.removeItem('sijibox_last_room'); // Pastikan ID room lama bersih
+            userIdDisplay.textContent = `ID Anda: ${userId}`;
+            usernameDisplay.textContent = `Nama: ${username}`;
+            showView('lobby');
+            const appId = "sijiboxarena"; // Menggunakan projectId sebagai appId
+            listenToRoomsList(appId);
+        }
+
+        // --- BARU: Fungsi untuk mencoba join ulang (saat refresh) ---
+        async function tryRejoinRoom(roomId) {
+            if (!isAuthReady || !userId || !username) {
+                console.warn("Gagal join ulang: Auth belum siap.");
+                showLobby(); // Fallback ke lobi
+                return;
+            }
+
+            const roomRef = doc(db, getRoomsCollectionPath(), roomId);
+            try {
+                const roomDoc = await getDoc(roomRef);
+                if (!roomDoc.exists()) {
+                    console.warn("Room lama (ID:", roomId, ") tidak ditemukan.");
+                    showLobby();
+                    return;
+                }
+
+                const roomData = roomDoc.data();
+                
+                // Jika game sudah selesai, jangan join.
+                if (roomData.gameStatus === 'finished') {
+                    console.warn("Room lama sudah selesai.");
+                    showLobby();
+                    return;
+                }
+
+                // Jika room penuh DAN saya bukan pemain, jangan join.
+                if (Object.keys(roomData.players).length >= 4 && !roomData.players[userId]) {
+                    console.warn("Room lama penuh.");
+                    showLobby();
+                    return;
+                }
+
+                // Jika room 'racing' DAN saya bukan pemain, jangan join.
+                if (roomData.gameStatus === 'racing' && !roomData.players[userId]) {
+                    console.warn("Room lama sedang balapan dan Anda tidak ada di daftar.");
+                    showLobby();
+                    return;
+                }
+
+                // Kondisi lain (lobi, atau racing tapi saya ada di daftar) aman.
+                // Panggil joinRoom() yang asli.
+                await joinRoom(roomId); 
+
+            } catch (e) {
+                console.error("Gagal bergabung kembali ke room:", e);
+                showLobby();
+            }
         }
 
         // --- Logika Firebase ---
@@ -294,15 +358,21 @@
                         userId = user.uid;
                         isAuthReady = true;
                         
-                        // Cek apakah nama pengguna sudah ada
-                        if (!username) {
+                        // --- PERUBAHAN: Pindahkan pengecekan localStorage ke SINI ---
+                        const storedUsername = localStorage.getItem('sijibox_username');
+                        if (!storedUsername) { 
+                            sessionStorage.removeItem('sijibox_last_room'); // Keamanan
                             showView('username');
                         } else {
-                            userIdDisplay.textContent = `ID Anda: ${userId}`;
-                            usernameDisplay.textContent = `Nama: ${username}`;
-                            console.log("Firebase Auth berhasil, UserID:", userId, "Username:", username);
-                            showView('lobby');
-                            listenToRoomsList(appId); // Mulai mendengarkan daftar room
+                            username = storedUsername; // Sinkronkan variabel global
+                            // --- Logika Rejoin ---
+                            const lastRoomId = sessionStorage.getItem('sijibox_last_room');
+                            if (lastRoomId) {
+                                console.log("Mencoba bergabung kembali ke room:", lastRoomId);
+                                await tryRejoinRoom(lastRoomId);
+                            } else {
+                                showLobby(); // Tampilkan lobi
+                            }
                         }
                     } else {
                         // Coba sign-in (hanya anonim untuk versi publik)
@@ -322,7 +392,8 @@
         }
         
         // BARU: Fungsi untuk mengatur nama pengguna
-        function handleSetUsername() {
+        // --- PERUBAHAN: Tambahkan 'async' ---
+        async function handleSetUsername() {
             const name = usernameInput.value.trim();
             if (name.length < 3) {
                 // Jangan gunakan alert()
@@ -332,15 +403,17 @@
             }
             usernameInput.classList.remove('border-red-500');
             username = name; // Simpan nama pengguna secara global
+            localStorage.setItem('sijibox_username', name); // --- BARU: Simpan ke localStorage ---
             
-            // Pindahkan ke lobi
-            userIdDisplay.textContent = `ID Anda: ${userId}`;
-            usernameDisplay.textContent = `Nama: ${username}`;
-            showView('lobby');
-            
-            // --- PERUBAHAN: Gunakan appId yang didefinisikan ---
-            const appId = "sijiboxarena"; 
-            listenToRoomsList(appId);
+            // --- PERUBAHAN: Pindahkan ke lobi ATAU join ulang ---
+            const lastRoomId = sessionStorage.getItem('sijibox_last_room');
+            if (lastRoomId) {
+                console.log("Nama di-set, mencoba bergabung kembali ke room:", lastRoomId);
+                // --- PERUBAHAN: Tambahkan 'await' ---
+                await tryRejoinRoom(lastRoomId); 
+            } else {
+                showLobby(); // Tampilkan lobi
+            }
         }
 
         // --- Logika Lobi ---
@@ -350,8 +423,69 @@
             return `/artifacts/${appId}/public/data/sijibox_rooms`;
         }
 
+        // --- BARU: Fungsi Helper Histori Room ---
+        const HISTORY_KEY = 'sijibox_room_history';
+
+        function getRoomHistory() {
+            return JSON.parse(localStorage.getItem(HISTORY_KEY) || '{}');
+        }
+
+        function saveToRoomHistory(roomId, roomName, arenaName) {
+            try {
+                const history = getRoomHistory();
+                history[roomId] = { roomName, arenaName, lastJoined: new Date().toISOString() };
+                
+                let sortedHistory = Object.entries(history)
+                    .sort(([, a], [, b]) => new Date(b.lastJoined) - new Date(a.lastJoined))
+                    .slice(0, 10); // Simpan 10 terakhir
+                
+                const newHistory = Object.fromEntries(sortedHistory);
+                localStorage.setItem(HISTORY_KEY, JSON.stringify(newHistory));
+            } catch (e) {
+                console.warn("Gagal menyimpan histori room:", e);
+            }
+        }
+
+        function clearRoomHistory() {
+            localStorage.removeItem(HISTORY_KEY);
+            renderRoomHistory(); // Render ulang (akan kosong)
+        }
+
+        function renderRoomHistory() {
+            const history = getRoomHistory();
+            const historyIds = Object.keys(history);
+
+            historyListContainer.innerHTML = ''; // Kosongkan
+            
+            if (historyIds.length === 0) {
+                historyListContainer.innerHTML = '<p class="text-gray-500 text-center col-span-full">Tidak ada histori.</p>';
+                return;
+            }
+
+            historyIds.sort((a, b) => new Date(history[b].lastJoined) - new Date(history[a].lastJoined));
+
+            historyIds.forEach(roomId => {
+                const room = history[roomId];
+                const roomEl = document.createElement('div');
+                roomEl.className = "p-3 bg-white border border-gray-200 rounded-lg shadow-sm flex justify-between items-center";
+                roomEl.innerHTML = `
+                    <div>
+                        <h4 class="font-semibold text-md text-indigo-700">${room.roomName || 'Room Tanpa Nama'}</h4>
+                        <p class="text-sm text-gray-500">Arena: ${room.arenaName || 'Tidak diketahui'}</p>
+                        <p class="text-xs text-gray-400">ID: ${roomId}</p>
+                    </div>
+                    <button data-room-id="${roomId}" class="btn-join-history px-3 py-1 bg-blue-500 text-white text-sm rounded-lg hover:bg-blue-600 transition-all">Gabung</button>
+                `;
+                historyListContainer.appendChild(roomEl);
+            });
+        }
+        // --- Akhir Fungsi Helper Histori Room ---
+
+
         // Mendengarkan semua room yang ada di lobi
-        function listenToRoomsList() { // appId tidak lagi dilempar, tapi diambil dari fungsi getRoomsCollectionPath
+        function listenToRoomsList() {
+            renderRoomHistory(); // BARU: Render histori saat masuk lobi
+
             const roomsCollection = collection(db, getRoomsCollectionPath());
             const q = query(roomsCollection); 
 
@@ -374,7 +508,7 @@
                         <div>
                             <h4 class="font-semibold text-lg text-indigo-700">${room.roomName || 'Room Tanpa Nama'}</h4>
                             <p class="text-sm text-gray-600">Arena: ${room.arenaName} (${playerCount} pemain)</p>
-                            <p class="text-xs text-gray-400">Host: ${room.hostUsername || room.hostId}</p>
+                            <p class="text-xs text-gray-400">Host: ${room.hostUsername || '???'}</p>
                         </div>
                         <button data-room-id="${roomId}" class="btn-join-list px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-all">Gabung</button>
                     `;
@@ -404,12 +538,34 @@
             createRoomBtn.disabled = true;
             createRoomBtn.textContent = "Membuat...";
 
-            const newRoomId = userId; // Host ID menjadi Room ID
-            const roomRef = doc(db, getRoomsCollectionPath(), newRoomId);
+            // --- PERUBAHAN: ID Room 6 Digit ---
+            let newRoomId = null;
+            let roomExists = true;
+            let attempts = 0;
+            const maxAttempts = 10;
+
+            while (roomExists && attempts < maxAttempts) {
+                newRoomId = Math.floor(100000 + Math.random() * 900000).toString();
+                const tempRoomRef = doc(db, getRoomsCollectionPath(), newRoomId);
+                const docSnap = await getDoc(tempRoomRef);
+                roomExists = docSnap.exists();
+                attempts++;
+            }
+
+            if (roomExists) {
+                console.error("Gagal membuat room, tidak bisa menemukan ID unik setelah", maxAttempts, "percobaan.");
+                // TODO: Tampilkan pesan error ke pengguna
+                createRoomBtn.disabled = false;
+                createRoomBtn.textContent = "Buat Room Baru";
+                return;
+            }
+            // --- AKHIR PERUBAHAN ---
+
+            const roomRef = doc(db, getRoomsCollectionPath(), newRoomId); // Gunakan ID baru
 
             try {
                 await setDoc(roomRef, {
-                    hostId: userId,
+                    hostId: userId, // Tetap simpan siapa host-nya
                     hostUsername: username, 
                     roomName: roomName,
                     arenaName: arenaName,
@@ -466,7 +622,7 @@
                     return;
                 }
                 
-                // Cek jika game sudah dimulai
+                // Cek jika game sudah dimulai (dan kita bukan pemain)
                 if (roomData.gameStatus !== 'lobby' && !roomData.players[userId]) {
                     console.warn("Pertandingan sudah dimulai!");
                     return;
@@ -477,6 +633,11 @@
                     console.error("Data arena untuk room ini tidak ditemukan!");
                     return;
                 }
+
+                // --- BARU: Simpan ke Histori & SessionStorage ---
+                saveToRoomHistory(roomId, roomData.roomName, roomData.arenaName);
+                sessionStorage.setItem('sijibox_last_room', roomId);
+                // --- AKHIR BARU ---
 
                 // PERBAIKAN: Reset status jika bergabung kembali ke lobi
                 if (roomData.players[userId] && roomData.gameStatus === 'lobby') {
@@ -506,6 +667,12 @@
                 // Mulai mendengarkan room spesifik ini
                 listenToRoom(roomId, arenaData, roomData.arenaName); // <-- Perhatikan arenaData
                 currentRoomId = roomId;
+
+                // --- BARU: Tampilkan ID Room ---
+                gameRoomIdDisplay.innerHTML = `Bagikan ID Room ini: <strong class="text-indigo-600">${roomId}</strong>`; // Hapus '(Host ID)'
+                gameRoomIdDisplay.classList.remove('hidden');
+                // --- Akhir BARU ---
+
                 showView('game');
 
             } catch (e) {
@@ -520,6 +687,7 @@
             const roomRef = doc(db, getRoomsCollectionPath(), roomId);
             
             previousGameStatus = "lobby"; // PERBAIKAN: Reset pelacak status
+            myPreviousReadyState = false; // BARU: Reset pelacak 'Siap'
 
             // FIX: Gambar arena dan palet SATU KALI saat join
             drawMaze(arenaData.maze); // Gunakan arenaData langsung
@@ -788,18 +956,22 @@
         }
 
 
-        async function leaveRoom() {
+        // --- BARU: Fungsi untuk kembali ke lobi ---
+        async function handleBackToLobby() {
             if (currentRoomListener) currentRoomListener(); // Berhenti mendengarkan room
             currentRoomListener = null;
+
+            // Hapus dari SessionStorage agar tidak auto-join
+            sessionStorage.removeItem('sijibox_last_room');
 
             if (currentRoomId && userId) {
                 const roomRef = doc(db, getRoomsCollectionPath(), currentRoomId);
                 
-                // Jika host keluar, hapus room. Jika pemain, hapus diri sendiri.
-                if (localGameData.hostId === userId) {
+                // Cek jika host keluar DAN tidak ada pemain lain
+                if (localGameData.hostId === userId && Object.keys(localGameData.players).length <= 1) {
                     await deleteDoc(roomRef).catch(e => console.error("Gagal hapus room:", e));
                 } else {
-                    // Hapus pemain dari map menggunakan deleteField()
+                    // Jika bukan host, atau host tapi ada pemain lain, hapus diri sendiri
                     await updateDoc(roomRef, {
                         [`players.${userId}`]: deleteField() 
                     }).catch(e => console.error("Gagal keluar room:", e));
@@ -811,8 +983,53 @@
             program.commands = [];
             fullRerenderAndReinit();
             
-            showView('lobby');
-            listenToRoomsList(); // Mulai dengarkan lobi lagi
+            gameRoomIdDisplay.classList.add('hidden'); // Sembunyikan ID Room
+            
+            // --- PERBEDAAN UTAMA DARI LOGOUT ---
+            // TIDAK menghapus localStorage, langsung ke lobi
+            showLobby(); // Tampilkan lobi (username masih ada)
+            // listenToRoomsList() sudah dipanggil di dalam showLobby()
+        }
+
+        // --- PERUBAHAN: Nama fungsi tetap handleLogout ---
+        async function handleLogout() {
+            if (currentRoomListener) currentRoomListener(); // Berhenti mendengarkan room
+            currentRoomListener = null;
+
+            // --- BARU: Hapus dari SessionStorage ---
+            sessionStorage.removeItem('sijibox_last_room');
+            // --- BARU: Hapus username dan histori dari localStorage ---
+            localStorage.removeItem('sijibox_username');
+            localStorage.removeItem(HISTORY_KEY);
+            // --- AKHIR BARU ---
+
+            if (currentRoomId && userId) {
+                const roomRef = doc(db, getRoomsCollectionPath(), currentRoomId);
+                
+                // --- PERUBAHAN: Hapus room hanya jika host DAN tidak ada pemain lain ---
+                if (localGameData.hostId === userId && Object.keys(localGameData.players).length <= 1) {
+                    await deleteDoc(roomRef).catch(e => console.error("Gagal hapus room:", e));
+                } else {
+                    // Hapus pemain dari map menggunakan deleteField()
+                    await updateDoc(roomRef, {
+                        [`players.${userId}`]: deleteField() 
+                    }).catch(e => console.error("Gagal keluar room:", e));
+                    
+                    // TODO: Jika host keluar, transfer host? Untuk saat ini, room tetap ada
+                    // tanpa host, tapi hostId tidak berubah.
+                }
+            }
+
+            currentRoomId = null;
+            localGameData = {};
+            program.commands = [];
+            fullRerenderAndReinit();
+            
+            gameRoomIdDisplay.classList.add('hidden'); // BARU: Sembunyikan ID Room
+            
+            // --- PERUBAHAN: Kembali ke layar username ---
+            username = null; // Hapus username global
+            showView('username'); // Tampilkan layar 'Masuk'
         }
         
         // Kunci/Buka input editor
@@ -848,6 +1065,9 @@
                 }
                 
                 if (myCurrentReadyState) { // PERUBAHAN: Gunakan var baru
+                    disableGameInput(true);
+                    btnReady.disabled = true;
+                    btnReady.textContent = "Menunggu Pemain Lain...";
                     btnResetProgram.disabled = true; // Nonaktifkan reset jika 'Siap'
                 } else {
                     disableGameInput(false);
@@ -1340,7 +1560,7 @@
         joinRoomBtn.addEventListener('click', () => {
             const roomId = joinRoomInput.value.trim();
             if (roomId) joinRoom(roomId);
-            else console.error("Masukkan ID Host untuk bergabung.");
+            else console.error("Masukkan ID Room untuk bergabung."); // PERUBAHAN
         });
         roomsListContainer.addEventListener('click', (e) => {
             const joinButton = e.target.closest('.btn-join-list');
@@ -1348,11 +1568,21 @@
                 joinRoom(joinButton.dataset.roomId);
             }
         });
+        // BARU: Listener untuk tombol join dari histori
+        historyListContainer.addEventListener('click', (e) => {
+            const joinButton = e.target.closest('.btn-join-history');
+            if (joinButton) {
+                joinRoom(joinButton.dataset.roomId);
+            }
+        });
+        btnClearHistory.addEventListener('click', clearRoomHistory); // BARU
         
         btnReady.addEventListener('click', handleReadyClick);
         btnStartRace.addEventListener('click', handleStartRaceClick);
-        btnLeaveRoom.addEventListener('click', leaveRoom);
-        btnResetProgram.addEventListener('click', handleResetProgram); // BARU
+        // --- PERUBAHAN: Ganti event listener ke 'handleLogout' ---
+        btnLogout.addEventListener('click', handleLogout); // PERUBAHAN
+        btnBackToLobby.addEventListener('click', handleBackToLobby); // BARU
+        btnResetProgram.addEventListener('click', handleResetProgram);
         
         // --- Inisialisasi Arena Select ---
         function populateArenaSelect() {
@@ -1618,8 +1848,8 @@
                 <!-- Gabung Room -->
                 <div class="bg-gray-50 p-4 rounded-lg border border-gray-200">
                     <h2 class="text-xl font-semibold text-gray-800 mb-3">Gabung Room</h2>
-                    <label for="join-room-input" class="block text-sm font-medium text-gray-700">Masukkan ID Host:</label>
-                    <input type="text" id="join-room-input" placeholder="Tempel ID Host di sini" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                    <label for="join-room-input" class="block text-sm font-medium text-gray-700">Masukkan ID Room (6 Digit):</label>
+                    <input type="text" id="join-room-input" placeholder="Contoh: 123456" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
                     <button id="btn-join-room" class="mt-4 w-full px-6 py-3 bg-green-600 text-white font-semibold rounded-xl shadow-lg hover:bg-green-700 transition-all transform hover:scale-105 active:scale-95 disabled:opacity-50">
                         Gabung
                     </button>
@@ -1632,6 +1862,20 @@
                 <!-- Daftar room diisi oleh JS -->
                 <p class="text-gray-500 text-center col-span-full">Memuat room...</p>
             </div>
+
+            <!-- BARU: Histori Room -->
+            <div class="mt-8">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-2xl font-semibold text-gray-800">Histori Room</h2>
+                    <button id="btn-clear-history" class="px-3 py-1 bg-red-500 text-white text-xs font-semibold rounded-lg hover:bg-red-600 transition-all">
+                        Bersihkan Histori
+                    </button>
+                </div>
+                <div id="history-list" class="grid grid-cols-1 gap-3 max-h-48 overflow-y-auto p-2 bg-gray-100 rounded-lg">
+                    <p class="text-gray-500 text-center col-span-full">Tidak ada histori.</p>
+                </div>
+            </div>
+
         </div>
     </div>
 
@@ -1640,9 +1884,18 @@
         
         <div class="flex justify-between items-center mb-4">
              <h1 class="text-3xl sm:text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-purple-600">SIJIBOX Arena</h1>
-             <button id="btn-leave-room" class="px-4 py-2 bg-gray-500 text-white text-sm font-semibold rounded-lg hover:bg-gray-600 transition-all">Keluar Room</button>
+             <!-- PERUBAHAN: Tambah tombol "Kembali ke Lobi" dan ganti ID/Warna "Logout" -->
+             <div>
+                <button id="btn-back-to-lobby" class="px-4 py-2 bg-gray-500 text-white text-sm font-semibold rounded-lg hover:bg-gray-600 transition-all mr-2">Kembali ke Lobi</button>
+                <button id="btn-logout" class="px-4 py-2 bg-red-600 text-white text-sm font-semibold rounded-lg hover:bg-red-700 transition-all">Logout</button>
+             </div>
         </div>
         
+        <!-- BARU: Tampilan ID Room -->
+        <div id="game-room-id-display" class="hidden text-center text-sm font-medium text-gray-700 bg-gray-200 p-2 rounded-md mb-4">
+            Bagikan ID Room ini: <strong class="text-indigo-600">123456</strong>
+        </div>
+
         <p id="game-status-message" class="hidden text-xl font-bold text-center text-blue-600 mb-4"></p>
         
         <!-- Konten Utama (Layout Responsif) -->
