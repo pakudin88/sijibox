@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tutorial SIJIBOX</title>
+    <style>
+        /* Menggunakan font yang sama dengan game untuk konsistensi */
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            line-height: 1.7;
+            background-color: #f3f4f6; /* Latar belakang abu-abu muda */
+            color: #374151; /* Teks abu-abu gelap */
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        /* Kontainer utama tutorial */
+        .container {
+            max-width: 800px;
+            width: 100%;
+            background-color: #ffffff;
+            border-radius: 16px; /* Sudut membulat */
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+            padding: 30px 40px;
+            border: 1px solid #e5e7eb;
+            box-sizing: border-box;
+        }
+
+        h1, h2, h3 {
+            color: #1f2937; /* Teks judul lebih gelap */
+            margin-top: 0;
+        }
+
+        h1 {
+            text-align: center;
+            font-size: 2.25rem;
+            /* Gradien seperti di game */
+            background: linear-gradient(to right, #4f46e5, #a855f7);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 10px;
+        }
+
+        h2 {
+            font-size: 1.75rem;
+            border-bottom: 2px solid #e0e7ff; /* Garis bawah indigo muda */
+            padding-bottom: 8px;
+            margin-top: 25px;
+            margin-bottom: 15px;
+        }
+
+        h3 {
+            font-size: 1.25rem;
+            color: #4f46e5; /* Indigo */
+            margin-top: 20px;
+            margin-bottom: 10px;
+        }
+
+        p, li {
+            font-size: 1rem;
+            margin-bottom: 15px;
+        }
+
+        ul, ol {
+            padding-left: 25px;
+        }
+
+        li {
+            margin-bottom: 10px;
+        }
+
+        /* Menyorot nama elemen/tombol */
+        code {
+            background-color: #eef2ff; /* Latar belakang indigo sangat muda */
+            color: #4338ca; /* Teks indigo gelap */
+            padding: 3px 6px;
+            border-radius: 6px;
+            font-family: "Courier New", Courier, monospace;
+            font-weight: 600;
+            font-size: 0.95em;
+        }
+        
+        /* BARU: Gaya untuk blok perintah di tutorial */
+        .tutor-block {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 8px; /* rounded-lg */
+            color: white;
+            font-weight: 600; /* font-semibold */
+            font-size: 0.95em;
+            line-height: 1.4;
+            vertical-align: middle;
+            border-bottom: 2px solid rgba(0,0,0,0.2);
+            margin-right: 5px;
+        }
+
+        /* BARU: Meniru warna gradien dari game */
+        .tutor-forward { 
+            background-image: linear-gradient(to top right, #22c55e, #16a34a); /* green-500 to green-600 */
+            border-bottom-color: #15803d; /* green-700 */
+        }
+        .tutor-turn { 
+            background-image: linear-gradient(to top right, #3b82f6, #2563eb); /* blue-500 to blue-600 */
+            border-bottom-color: #1d4ed8; /* blue-700 */
+        }
+        .tutor-repeat { 
+            background-image: linear-gradient(to top right, #eab308, #d97706); /* yellow-500 to amber-600 */
+            border-bottom-color: #b45309; /* amber-700 */
+        }
+        .tutor-repeat-forever { 
+            background-image: linear-gradient(to top right, #f59e0b, #ea580c); /* amber-500 to orange-600 */
+            border-bottom-color: #c2410c; /* orange-700 */
+        }
+        .tutor-if { 
+            background-image: linear-gradient(to top right, #8b5cf6, #7c3aed); /* purple-500 to purple-600 */
+            border-bottom-color: #6d28d9; /* purple-700 */
+        }
+         .tutor-if-else { 
+            background-image: linear-gradient(to top right, #a855f7, #9333ea); /* purple-500 to purple-600 */
+            border-bottom-color: #7e22ce; /* purple-700 */
+        }
+        .tutor-func-def { 
+            background-image: linear-gradient(to top right, #ec4899, #d946ef); /* pink-500 to fuchsia-500 */
+            border-bottom-color: #c026d3; /* fuchsia-600 */
+        }
+        .tutor-func-call { 
+            background-image: linear-gradient(to top right, #f472b6, #e879f9); /* pink-400 to fuchsia-400 */
+            border-bottom-color: #d946ef; /* fuchsia-500 */
+        }
+
+        /* Tautan kembali ke game */
+        .back-link {
+            display: inline-block;
+            text-align: center;
+            padding: 12px 20px;
+            background-color: #4f46e5; /* Tombol indigo */
+            color: #ffffff;
+            text-decoration: none;
+            font-weight: 600;
+            border-radius: 10px;
+            transition: all 0.3s ease;
+            margin-top: 25px;
+            border: none;
+            cursor: pointer;
+        }
+
+        .back-link:hover {
+            background-color: #4338ca;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 10px rgba(79, 70, 229, 0.3);
+        }
+
+        /* Bagian tombol kontrol */
+        .controls-list {
+            list-style-type: none;
+            padding-left: 0;
+        }
+
+        .controls-list li {
+            display: flex;
+            align-items: flex-start;
+            margin-bottom: 15px;
+        }
+
+        .controls-list code {
+            margin-right: 10px;
+            flex-shrink: 0;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>Selamat Datang di Tutorial SIJIBOX</h1>
+        <p>SIJIBOX (Simulasi Interaktif Jejak Instruksi) adalah permainan teka-teki di mana Anda belajar dasar-dasar pemrograman dengan menyusun balok-balok perintah untuk memandu bot ke tujuan.</p>
+
+        <h2>Tujuan Permainan</h2>
+        <p>
+            Tujuan Anda adalah untuk memandu bot (robot biru <code>➡️</code>) dari posisi awalnya melewati labirin untuk mencapai petak hijau (<code>Finish</code>). Anda melakukannya dengan membuat program menggunakan blok perintah yang tersedia.
+        </p>
+
+        <h2>Cara Bermain: Langkah demi Langkah</h2>
+        <ol>
+            <li>
+                <strong>Pilih Level:</strong> Gunakan menu dropdown <code>Pilih Level</code> untuk memilih tantangan yang ingin Anda mainkan. Anda akan memulai dari Level 1.
+            </li>
+            <li>
+                <strong>Susun Program Anda:</strong>
+                <ul>
+                    <li>Lihat bagian <code>Palette Perintah</code> di sebelah kanan. Ini berisi semua blok perintah yang diizinkan untuk level tersebut.</li>
+                    <li>Klik dan seret (drag) blok yang Anda inginkan dari <code>Palette Perintah</code> ke area <code>Program</code> di bawahnya.</li>
+                    <li>Anda dapat menggunakan blok dari Palette sebanyak yang Anda butuhkan.</li>
+                </ul>
+            </li>
+            <li>
+                <strong>Atur Blok Perintah:</strong>
+                <ul>
+                    <li><strong>Mengubah Urutan:</strong> Di dalam area <code>Program</code>, Anda dapat menarik dan melepas (drag-and-drop) blok untuk mengubah urutan eksekusinya.</li>
+                    <li><strong>Menghapus Blok:</strong> Untuk menghapus blok dari program Anda, klik tombol <code>✖</code> merah kecil yang muncul di sudut blok tersebut.</li>
+                    <li><strong>Blok Kontainer:</strong> Blok seperti <code>Ulangi</code> atau <code>Jika</code> adalah "kontainer". Anda dapat menyeret blok lain *ke dalam* area kosong di blok kontainer tersebut.</li>
+                    <li><strong>Mengatur Kondisi:</strong> Pada blok <code>Jika</code>, Anda dapat mengubah kondisi (misalnya, dari <code>Jalan di Depan</code> menjadi <code>Jalan di Kiri</code>) menggunakan menu dropdown di dalam blok itu sendiri.</li>
+                </ul>
+            </li>
+            <li>
+                <strong>Jalankan Program:</strong> Setelah Anda puas dengan susunan program Anda, klik tombol <code>Jalankan!</code>.
+            </li>
+            <li>
+                <strong>Lihat Hasilnya:</strong>
+                <ul>
+                    <li>Bot akan bergerak sesuai dengan perintah Anda, satu per satu. Blok yang sedang dieksekusi akan disorot.</li>
+                    <li><strong>Jika Berhasil:</strong> Anda akan melihat pesan "Berhasil!" dan tombol <code>Level Berikutnya</code> akan muncul.</li>
+                    <li><strong>Jika Gagal:</strong> Anda mungkin melihat pesan seperti "Menabrak!" jika bot menabrak dinding.</li>
+                </ul>
+            </li>
+            <li>
+                <strong>Ulangi (Iterasi):</strong> Jika program Anda gagal, jangan khawatir! Cukup klik tombol <code>Reset</code>. Ini akan mengembalikan bot ke posisi awal dan mengosongkan area program Anda, siap untuk Anda coba lagi.
+            </li>
+        </ol>
+
+        <h2>Penjelasan Blok Perintah</h2>
+        <ul>
+            <!-- DIPERBARUI: Menggunakan kelas .tutor-block baru -->
+            <li><span class="tutor-block tutor-forward">⬆️ Maju</span>: Membuat bot bergerak maju satu petak ke arah yang dihadapinya.</li>
+            <li><span class="tutor-block tutor-turn">↪️ Kiri</span>: Membuat bot berputar 90 derajat ke kiri (berlawanan arah jarum jam). Bot tetap di petak yang sama.</li>
+            <li><span class="tutor-block tutor-turn">↩️ Kanan</span>: Membuat bot berputar 90 derajat ke kanan (searah jarum jam). Bot tetap di petak yang sama.</li>
+            <li><span class="tutor-block tutor-repeat">Ulangi 3x</span>: Menjalankan semua blok yang ada *di dalam* blok ini sebanyak 3 kali.</li>
+            <li><span class="tutor-block tutor-repeat-forever">Ulangi Terus</span>: Menjalankan semua blok di dalamnya berulang-ulang tanpa henti (atau sampai bot mencapai tujuan/batas aman).</li>
+            <li><span class="tutor-block tutor-if">Jika Jalan</span>: Sebuah blok kondisional. Blok ini akan memeriksa kondisi (misalnya, "Apakah ada jalan di depan?"). Jika ya, maka blok di dalamnya akan dijalankan. Jika tidak, blok di dalamnya akan dilewati.</li>
+            <li><span class="tutor-block tutor-if-else">Jika/Lainnya</span>: Mirip dengan "Jika", tetapi memiliki dua bagian. Jika kondisi benar, bagian pertama ("Jika") dijalankan. Jika kondisi salah, bagian kedua ("Lainnya") dijalankan.</li>
+            <li><span class="tutor-block tutor-func-def">Definisi Fungsi 1</span>: Memungkinkan Anda "mengajari" bot sebuah perintah baru. Seret blok ke dalam ini untuk mendefinisikan "Fungsi 1". Blok ini tidak melakukan apa-apa saat dijalankan.</li>
+            <li><span class="tutor-block tutor-func-call">Jalankan Fungsi 1</span>: Menjalankan semua blok yang telah Anda tempatkan di dalam blok <span class="tutor-block tutor-func-def">Definisi Fungsi 1</span>. Ini adalah cara yang bagus untuk menggunakan kembali urutan perintah yang sama berulang kali.</li>
+        </ul>
+
+        <h2>Tombol Kontrol Utama</h2>
+        <ul class="controls-list">
+            <li><code>Jalankan!</code>: Memulai eksekusi program yang telah Anda susun.</li>
+            <li><code>Reset</code>: Menghentikan eksekusi (jika sedang berjalan), mengembalikan bot ke posisi awal, dan membersihkan area program.</li>
+            <li><code>Level Berikutnya</code>: Muncul setelah Anda berhasil menyelesaikan level, memungkinkan Anda untuk maju ke tantangan berikutnya.</li>
+        </ul>
+
+        <p style="text-align: center; margin-top: 30px; font-weight: 600;">
+            Itu saja! Sekarang Anda siap untuk memecahkan teka-teki. Selamat bermain!
+        </p>
+
+        <center>
+            <a href="index.html" class="back-link">Kembali ke Game</a>
+        </center>
+    </div>
+
+</body>
+</html>
